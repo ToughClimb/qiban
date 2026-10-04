@@ -33,7 +33,7 @@ Avatar affordance: [desktop character settings](visual-after-desktop-character-s
 
 ## Checks
 
-- `npm run typecheck`, `npm test` (32 tests), `npm run build`, `npm run desktop:build` pass.
+- `npm run typecheck`, `npm test` (35 tests), `npm run build`, `npm run desktop:build` pass. The bounded [accent color follow-up](appearance.md) adds three unit tests and its own persistence/wipe smoke.
 - `npm run test:ui` preserves chat isolation, persistence, reset, retry/edit, cancellation, storage failure, invite and mixed demo/live provenance checks.
 - `node tests/connection-panel-smoke.mjs` passes the original eight API/key/model scenarios and two demo/disclosure onboarding scenarios.
 - `node tests/composer-focus-smoke.mjs` fails against the untouched base at the keyboard-send focus assertion and passes six scenarios on this branch: keyboard send, send button, Tab navigation, outside pointer interaction, character-switch cancellation, and IME/Shift+Enter.
@@ -42,4 +42,4 @@ Avatar affordance: [desktop character settings](visual-after-desktop-character-s
 
 The focus fix waits until React enables the composer. It restores focus only for a request started in the composer and cancels restoration when the user navigates elsewhere or leaves the page. IME handlers are unchanged.
 
-Native Electron smoke remains unavailable in this environment because its binary download fails and there is no display server. Native avatar validation/storage and Windows/Android acceptance belong to their platform owners. This remains a draft pending user visual acceptance; no integration merge or release is implied.
+Native Electron smoke remains unavailable in this environment because its binary download fails and there is no display server. Native avatar validation/storage and Windows/Android acceptance belong to their platform owners. The user accepted the lean composition; the separate accent color follow-up has its own review evidence. This remains a draft with no integration merge or release implied.
