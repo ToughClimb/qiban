@@ -5,8 +5,6 @@ import "./styles.css";
 import { initializeAndroid } from "./android/bridge";
 import "./android/platform.css";
 initializeAndroid();
-import { applyAccent, storedAccent } from "./appearance";
-applyAccent(storedAccent());
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
