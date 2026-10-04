@@ -1,4 +1,5 @@
 import { Avatar } from "./Avatar";
+import { ChatImagePreview } from "./ChatImagePreview";
 import type { RefObject } from "react";
 import type { Character, Message, Mode } from "../shared/characters";
 
@@ -9,6 +10,8 @@ type Props = {
   busy: boolean;
   error: string;
   retryDisabled: boolean;
+  editDisabled?: boolean;
+  omittedImageIds?: string[];
   onRetry: () => void;
   onEdit: () => void;
   scrollArea: RefObject<HTMLDivElement | null>;
@@ -20,6 +23,8 @@ export function ChatMessages({
   busy,
   error,
   retryDisabled,
+  editDisabled = false,
+  omittedImageIds = [],
   onRetry,
   onEdit,
   scrollArea,
@@ -65,7 +70,14 @@ export function ChatMessages({
                     : "历史回复"}
               </span>
             )}
-            <p className="bubble">{message.content}</p>
+            {message.image && (
+              <ChatImagePreview
+                characterId={character.id}
+                image={message.image}
+                omitted={omittedImageIds.includes(message.image.id)}
+              />
+            )}
+            {message.content && <p className="bubble">{message.content}</p>}
           </div>
         </div>
       ))}
@@ -92,7 +104,7 @@ export function ChatMessages({
           <button disabled={retryDisabled} onClick={onRetry}>
             重试回复
           </button>
-          <button onClick={onEdit}>编辑消息</button>
+          <button disabled={editDisabled} onClick={onEdit}>编辑消息</button>
         </div>
       )}
     </div>
