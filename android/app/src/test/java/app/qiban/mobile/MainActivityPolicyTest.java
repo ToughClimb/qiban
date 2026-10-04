@@ -2,6 +2,8 @@ package app.qiban.mobile;
 
 import static org.junit.Assert.*;
 
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.net.Uri;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -12,6 +14,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginHandle;
 import com.getcapacitor.PluginMethodHandle;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -21,9 +24,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE, sdk = 35)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 public class MainActivityPolicyTest {
   private static WebResourceRequest request(String url) {
     return new WebResourceRequest() {
@@ -92,7 +97,7 @@ public class MainActivityPolicyTest {
   }
 
   @Test
-  public void onlyCanonicalPackagedPathsAndBoundedPngImagesRemainAllowed() {
+  public void onlyCanonicalPackagedPathsAndBoundedStaticImagesRemainAllowed() {
     assertEquals("index.html", MainActivity.packagedPath("https://localhost/"));
     assertEquals("index.html", MainActivity.packagedPath("https://localhost/index.html#chat"));
     assertEquals(
@@ -104,10 +109,86 @@ public class MainActivityPolicyTest {
     assertNull(MainActivity.packagedPath("https://localhost/other.html"));
     assertNull(MainActivity.packagedPath("https://localhost/assets/other.html"));
     MainActivity activity = new MainActivity();
-    assertNull(activity.packagedResponse(request("data:image/png;base64,iVBORw0KGgoAAAA")));
+    assertNull(
+        activity.packagedResponse(request(imageUrl("png", picture(Bitmap.CompressFormat.PNG)))));
     assertEquals(
         403,
         activity.packagedResponse(request("data:text/html;base64,PHNjcmlwdD4=")).getStatusCode());
+  }
+
+  private static byte[] picture(Bitmap.CompressFormat format) {
+    Bitmap image = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
+    image.eraseColor(Color.BLUE);
+    try (ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+      assertTrue(image.compress(format, 90, bytes));
+      return bytes.toByteArray();
+    } catch (IOException error) {
+      throw new AssertionError(error);
+    } finally {
+      image.recycle();
+    }
+  }
+
+  private static String imageUrl(String format, byte[] bytes) {
+    return "data:image/"
+        + format
+        + ";base64,"
+        + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+  }
+
+  @Test
+  public void imagePreviewsPermitOnlyBoundedStaticRasterData() {
+    MainActivity activity = new MainActivity();
+    String png = imageUrl("png", picture(Bitmap.CompressFormat.PNG));
+    String jpeg = imageUrl("jpeg", picture(Bitmap.CompressFormat.JPEG));
+    String webp = imageUrl("webp", picture(Bitmap.CompressFormat.WEBP_LOSSLESS));
+    for (String image : Arrays.asList(png, jpeg, webp)) {
+      assertTrue(MainActivity.inlineImage(image));
+      assertNull(activity.packagedResponse(request(image)));
+      assertNull(MainActivity.packagedPath(image));
+    }
+    for (String invalid :
+        Arrays.asList(
+            imageUrl("jpeg", picture(Bitmap.CompressFormat.PNG)),
+            imageUrl("png", new byte[] {1, 2, 3}),
+            imageUrl("jpeg", new byte[1024 * 1024 + 1]),
+            "data:image/svg+xml;base64,PHN2Zz4=",
+            "data:image/gif;base64,R0lGODlh",
+            "data:text/html;base64,PHNjcmlwdD4=",
+            jpeg.substring(0, jpeg.length() - 1),
+            png + "?url=https://example.com")) {
+      assertFalse(MainActivity.inlineImage(invalid));
+      assertEquals(403, activity.packagedResponse(request(invalid)).getStatusCode());
+    }
+    byte[] original = picture(Bitmap.CompressFormat.PNG), apng = new byte[original.length + 20];
+    System.arraycopy(original, 0, apng, 0, 33);
+    java.nio.ByteBuffer.wrap(apng, 33, 4).putInt(8);
+    System.arraycopy("acTL".getBytes(StandardCharsets.US_ASCII), 0, apng, 37, 4);
+    System.arraycopy(original, 33, apng, 53, original.length - 33);
+    assertFalse(MainActivity.inlineImage(imageUrl("png", apng)));
+    original = picture(Bitmap.CompressFormat.WEBP_LOSSLESS);
+    byte[] animatedWebp = Arrays.copyOf(original, original.length + 8);
+    System.arraycopy(
+        "ANIM".getBytes(StandardCharsets.US_ASCII), 0, animatedWebp, original.length, 4);
+    java.nio.ByteBuffer.wrap(animatedWebp, 4, 4)
+        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        .putInt(animatedWebp.length - 8);
+    assertFalse(MainActivity.inlineImage(imageUrl("webp", animatedWebp)));
+  }
+
+  @Test
+  public void originResetTargetsOnlyTheFixedAppDocument() {
+    assertTrue(OriginStorageReset.targetDocument("https://localhost/"));
+    assertTrue(OriginStorageReset.targetDocument("https://localhost/index.html#settings"));
+    assertTrue(OriginStorageReset.targetDocument("https://localhost:443/"));
+    for (String url :
+        Arrays.asList(
+            "https://example.com/",
+            "http://localhost/",
+            "https://localhost/assets/index.js",
+            "https://localhost/?origin=https://example.com",
+            "https://localhost/%69ndex.html",
+            "file:///private/index.html")) assertFalse(OriginStorageReset.targetDocument(url));
   }
 
   @Test

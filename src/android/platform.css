@@ -18,3 +18,54 @@ html[data-qiban-platform="android"] dialog {
       var(--safe-area-inset-bottom, 0px) - 32px
   );
 }
+
+/* Shared appearance control presentation, scoped to the native settings shell. */
+html[data-qiban-platform="android"] .appearance-options {
+  border-top: 1px solid var(--line);
+}
+html[data-qiban-platform="android"] .appearance-options > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 18px 0;
+}
+html[data-qiban-platform="android"] .accent-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 16px;
+}
+html[data-qiban-platform="android"] .accent-swatch {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+}
+html[data-qiban-platform="android"] .accent-swatch::before {
+  content: "";
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--swatch);
+}
+html[data-qiban-platform="android"] .accent-swatch[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+html[data-qiban-platform="android"] .settings-dialog label.custom-accent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 0 8px;
+  font-weight: 400;
+}
+html[data-qiban-platform="android"] .settings-dialog input[type="color"] {
+  width: 44px;
+  height: 44px;
+  padding: 4px;
+  cursor: pointer;
+}

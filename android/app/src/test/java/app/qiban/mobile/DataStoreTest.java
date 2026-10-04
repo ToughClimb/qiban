@@ -176,4 +176,55 @@ public class DataStoreTest {
     store.deleteAll();
     assertEquals(0, store.loadHistory().length());
   }
+
+  @Test
+  public void acceptsOnlyExactUserImageMetadataIncludingImageOnlyTurns() throws Exception {
+    JSONObject image =
+        new JSONObject()
+            .put("id", "image-01234567-89ab-cdef-0123-456789abcdef")
+            .put("mimeType", "image/jpeg")
+            .put("byteLength", 30)
+            .put("width", 100)
+            .put("height", 100);
+    JSONObject message =
+        new JSONObject()
+            .put("id", "image-turn")
+            .put("role", "user")
+            .put("content", "")
+            .put("image", image);
+    JSONObject history = new JSONObject().put("lin", new JSONArray().put(message));
+    DataStore store = store();
+    store.saveHistory(history);
+    assertEquals(history.toString(), store.loadHistory().toString());
+    for (String key : new String[] {"previewUrl", "imageOmitted"}) {
+      JSONObject badMessage = new JSONObject(message.toString()).put(key, true);
+      try {
+        DataStore.validateHistory(new JSONObject().put("lin", new JSONArray().put(badMessage)));
+        fail();
+      } catch (IllegalArgumentException expected) {
+      }
+    }
+    JSONObject extra = new JSONObject(image.toString()).put("path", "outside");
+    try {
+      DataStore.validateHistory(
+          new JSONObject()
+              .put(
+                  "lin",
+                  new JSONArray().put(new JSONObject(message.toString()).put("image", extra))));
+      fail();
+    } catch (IllegalArgumentException expected) {
+    }
+    JSONObject assistant =
+        new JSONObject()
+            .put("id", "assistant")
+            .put("role", "assistant")
+            .put("content", "hello")
+            .put("image", image);
+    try {
+      DataStore.validateHistory(
+          new JSONObject().put("lin", new JSONArray().put(message).put(assistant)));
+      fail();
+    } catch (IllegalArgumentException expected) {
+    }
+  }
 }

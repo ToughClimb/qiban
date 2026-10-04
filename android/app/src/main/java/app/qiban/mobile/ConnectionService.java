@@ -13,11 +13,36 @@ public final class ConnectionService {
   private JSONArray models = new JSONArray();
   private boolean enabled, remembered, configuring;
   private final KeyStoreSecrets secrets;
+  private final ImageResolver images;
   private final NativeHttp http = new NativeHttp();
   private final Map<String, NativeHttp.Cancellation> active = new HashMap<>();
   private NativeHttp.Cancellation setup;
 
   public ConnectionService(Context context) {
+    this(context, null);
+  }
+
+  public ConnectionService(Context context, ChatImageStore imageStore) {
+    images =
+        imageStore == null
+            ? null
+            : new ImageResolver() {
+              @Override
+              public ChatImageStore.StoredImage resolve(String owner, JSONObject metadata)
+                  throws Exception {
+                return imageStore.resolve(owner, metadata);
+              }
+
+              @Override
+              public ChatImageStore.StoredImage resolve(
+                  String owner, JSONObject metadata, NativeHttp.Cancellation token)
+                  throws Exception {
+                return imageStore.resolve(
+                    owner,
+                    metadata,
+                    () -> token.cancelled || Thread.currentThread().isInterrupted());
+              }
+            };
     secrets = new KeyStoreSecrets(context);
     try {
       JSONObject s = secrets.load();
@@ -213,30 +238,301 @@ public final class ConnectionService {
   }
 
   static JSONArray validateMessages(JSONObject request) {
+    JSONArray messages = validateShapes(request);
+    int bytes = 0;
+    for (int i = 0; i < messages.length(); i++)
+      bytes += utf8(messages.optJSONObject(i).optString("content"));
+    if (bytes > 32768 || utf8(request.toString()) > 49152)
+      throw new IllegalArgumentException(INPUT);
+    return messages;
+  }
+
+  static final String IMAGE_OMISSION_TEXT = "[这张较早的图片未包含在本次请求中；不得推测其内容。]";
+  static final int MAX_IMAGE_BYTES = 1024 * 1024;
+  static final int MAX_IMAGE_PROVIDER_BYTES = 49152 + 3 * (8 * ((MAX_IMAGE_BYTES + 2) / 3) + 512);
+  private static final String IMAGE_ERROR = "图片无法安全读取，请重新选择图片后重试。";
+
+  interface ImageResolver {
+    ChatImageStore.StoredImage resolve(String owner, JSONObject metadata) throws Exception;
+
+    default ChatImageStore.StoredImage resolve(
+        String owner, JSONObject metadata, NativeHttp.Cancellation token) throws Exception {
+      checkCancelled(token);
+      return resolve(owner, metadata);
+    }
+  }
+
+  static final class PreparedImageRequest {
+    final JSONObject body;
+    final JSONArray omittedImageIds;
+
+    PreparedImageRequest(JSONObject body, JSONArray omitted) {
+      this.body = body;
+      this.omittedImageIds = omitted;
+    }
+  }
+
+  static void checkCancelled(NativeHttp.Cancellation token) throws NativeHttp.Failure {
+    if (token.cancelled || Thread.currentThread().isInterrupted())
+      throw new NativeHttp.Failure("cancelled", "已取消这次连接。");
+  }
+
+  static boolean validImage(JSONObject image) {
+    if (image == null
+        || image.length() != 5
+        || !(image.opt("id") instanceof String)
+        || !image
+            .optString("id")
+            .matches("image-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"))
+      return false;
+    if (!Arrays.asList("image/jpeg", "image/png", "image/webp").contains(image.opt("mimeType")))
+      return false;
+    for (String field : new String[] {"byteLength", "width", "height"}) {
+      Object value = image.opt(field);
+      if (!(value instanceof Number)) return false;
+      double number = ((Number) value).doubleValue();
+      if (!Double.isFinite(number)
+          || number != Math.rint(number)
+          || number <= 0
+          || number > (field.equals("byteLength") ? MAX_IMAGE_BYTES : 1600)) return false;
+    }
+    return true;
+  }
+
+  private static boolean hasImages(JSONObject request) {
+    JSONArray messages = request.optJSONArray("messages");
+    if (messages == null) return false;
+    for (int i = 0; i < messages.length(); i++) {
+      JSONObject message = messages.optJSONObject(i);
+      if (message != null && (message.has("image") || message.has("imageOmitted"))) return true;
+    }
+    return false;
+  }
+
+  static JSONArray validateShapes(JSONObject request) {
     try {
       if (request == null
           || request.length() != 2
           || !(request.opt("characterId") instanceof String)
           || request.getString("characterId").isEmpty()) throw new Exception();
       JSONArray messages = request.getJSONArray("messages");
-      int bytes = 0;
       if (messages.length() < 1 || messages.length() > 40 || messages.length() % 2 != 1)
         throw new Exception();
       for (int i = 0; i < messages.length(); i++) {
-        JSONObject m = messages.getJSONObject(i);
+        JSONObject message = messages.getJSONObject(i);
         String role = i % 2 == 0 ? "user" : "assistant";
-        if (m.length() != 2 || !role.equals(m.opt("role")) || !(m.opt("content") instanceof String))
-          throw new Exception();
-        String text = m.getString("content");
-        if (text.trim().isEmpty() || text.length() > (i % 2 == 0 ? 2000 : 8000))
-          throw new Exception();
-        bytes += utf8(text);
+        Iterator<String> keys = message.keys();
+        while (keys.hasNext())
+          if (!Arrays.asList("role", "content", "image", "imageOmitted").contains(keys.next()))
+            throw new Exception();
+        boolean image = message.has("image"), omission = message.has("imageOmitted");
+        if (!role.equals(message.opt("role"))
+            || !(message.opt("content") instanceof String)
+            || ((image || omission) && !role.equals("user"))
+            || image && (!validImage(message.optJSONObject("image")) || omission)
+            || omission && !Boolean.TRUE.equals(message.opt("imageOmitted"))) throw new Exception();
+        String text = message.getString("content");
+        if (trimText(text).isEmpty() && !image && !omission
+            || text.length() > (i % 2 == 0 ? 2000 : 8000)) throw new Exception();
       }
-      if (bytes > 32768 || utf8(request.toString()) > 49152) throw new Exception();
       return messages;
     } catch (Exception e) {
       throw new IllegalArgumentException(INPUT);
     }
+  }
+
+  private static JSONObject copyMessage(JSONObject original, boolean omit) {
+    JSONObject copy =
+        object("role", original.optString("role"), "content", original.optString("content"));
+    try {
+      if (omit || original.has("imageOmitted")) copy.put("imageOmitted", true);
+      else if (original.has("image")) copy.put("image", original.getJSONObject("image"));
+      return copy;
+    } catch (Exception e) {
+      throw new IllegalArgumentException(INPUT);
+    }
+  }
+
+  private static boolean fitsImageContext(String owner, JSONArray messages) {
+    int text = 0, count = 0, raw = 0;
+    for (int i = 0; i < messages.length(); i++) {
+      JSONObject message = messages.optJSONObject(i);
+      text += utf8(message.optString("content"));
+      JSONObject image = message.optJSONObject("image");
+      if (image != null) {
+        count++;
+        raw += image.optInt("byteLength");
+      }
+    }
+    return text <= 32768
+        && count <= 3
+        && raw <= 3 * MAX_IMAGE_BYTES
+        && utf8(object("characterId", owner, "messages", messages).toString()) <= 49152;
+  }
+
+  static String encodeImage(byte[] bytes, NativeHttp.Cancellation token) throws NativeHttp.Failure {
+    final char[] alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toCharArray();
+    char[] encoded = new char[4 * ((bytes.length + 2) / 3)];
+    int out = 0;
+    for (int i = 0; i < bytes.length; i += 3) {
+      if ((i % 12288) == 0) checkCancelled(token);
+      int a = bytes[i] & 255,
+          b = i + 1 < bytes.length ? bytes[i + 1] & 255 : 0,
+          c = i + 2 < bytes.length ? bytes[i + 2] & 255 : 0;
+      encoded[out++] = alphabet[a >>> 2];
+      encoded[out++] = alphabet[((a & 3) << 4) | (b >>> 4)];
+      encoded[out++] = i + 1 < bytes.length ? alphabet[((b & 15) << 2) | (c >>> 6)] : '=';
+      encoded[out++] = i + 2 < bytes.length ? alphabet[c & 63] : '=';
+    }
+    checkCancelled(token);
+    return new String(encoded);
+  }
+
+  static PreparedImageRequest prepareImageModelRequest(
+      JSONObject request,
+      JSONObject persona,
+      String selected,
+      boolean deepseek,
+      ImageResolver resolver,
+      NativeHttp.Cancellation token)
+      throws Exception {
+    checkCancelled(token);
+    JSONArray originals = validateShapes(request);
+    String owner = request.getString("characterId");
+    Set<String> allIds = new LinkedHashSet<>();
+    for (int i = 0; i < originals.length(); i++) {
+      JSONObject image = originals.getJSONObject(i).optJSONObject("image");
+      if (image != null) allIds.add(image.getString("id"));
+    }
+    JSONArray recent = new JSONArray();
+    int remaining = 3;
+    for (int i = originals.length() - 1; i >= 0; i--) {
+      JSONObject message = originals.getJSONObject(i);
+      boolean omit = message.has("image") && remaining-- <= 0;
+      recent.put(copyMessage(message, omit));
+    }
+    JSONArray forward = new JSONArray();
+    for (int i = recent.length() - 1; i >= 0; i--) forward.put(recent.getJSONObject(i));
+    recent = forward;
+    while (!fitsImageContext(owner, recent) && recent.length() > 1) {
+      recent.remove(0);
+      recent.remove(0);
+    }
+    if (!fitsImageContext(owner, recent)) throw new IllegalArgumentException(INPUT);
+    boolean retainedImage = false;
+    for (int i = 0; i < recent.length(); i++) retainedImage |= recent.getJSONObject(i).has("image");
+    if (retainedImage && (resolver == null || !deepseek || !"deepseek-flash".equals(selected)))
+      throw new IllegalArgumentException("图片聊天需要支持图片的 DeepSeek 服务和 deepseek-flash 模型。");
+    IdentityHashMap<JSONObject, JSONObject> originMap = new IdentityHashMap<>();
+    JSONArray textMessages = new JSONArray();
+    for (int i = 0; i < recent.length(); i++) {
+      JSONObject original = recent.getJSONObject(i);
+      JSONObject text =
+          object(
+              "role",
+              original.getString("role"),
+              "content",
+              original.getString("content")
+                  + (original.has("imageOmitted") ? "\n" + IMAGE_OMISSION_TEXT : ""));
+      originMap.put(text, original);
+      textMessages.put(text);
+    }
+    JSONObject body = buildTextRequest(textMessages, persona, selected, deepseek);
+    JSONArray messages = body.getJSONArray("messages");
+    // Count all image-part envelopes against the existing 48KiB budget, excluding inline data only.
+    while (true) {
+      JSONArray skeleton = new JSONArray();
+      for (int i = 0; i < messages.length(); i++) {
+        JSONObject text = messages.getJSONObject(i), original = originMap.get(text);
+        JSONObject image = original == null ? null : original.optJSONObject("image");
+        skeleton.put(
+            image == null
+                ? text
+                : object(
+                    "role",
+                    "user",
+                    "content",
+                    new JSONArray()
+                        .put(object("type", "text", "text", text.getString("content")))
+                        .put(
+                            object(
+                                "type",
+                                "image_url",
+                                "image_url",
+                                object(
+                                    "url",
+                                    "data:" + image.getString("mimeType") + ";base64,",
+                                    "detail",
+                                    "original")))));
+      }
+      JSONObject shell =
+          object("model", selected, "messages", skeleton, "max_tokens", 256, "stream", false);
+      if (deepseek) shell.put("thinking", object("type", "disabled"));
+      if (utf8(shell.toString()) <= 49152) break;
+      if (messages.length() <= 4) throw new IllegalArgumentException(INPUT);
+      messages.remove(3);
+      messages.remove(3);
+    }
+    Set<String> sent = new HashSet<>();
+    JSONArray wire = new JSONArray();
+    int rawBytes = 0;
+    for (int i = 0; i < messages.length(); i++) {
+      checkCancelled(token);
+      JSONObject text = messages.getJSONObject(i), original = originMap.get(text);
+      JSONObject expected = original == null ? null : original.optJSONObject("image");
+      if (expected == null) {
+        wire.put(text);
+        continue;
+      }
+      ChatImageStore.StoredImage stored;
+      try {
+        stored = resolver.resolve(owner, expected, token);
+      } catch (Exception error) {
+        checkCancelled(token);
+        throw new IllegalArgumentException(IMAGE_ERROR);
+      }
+      checkCancelled(token);
+      if (stored == null
+          || !validImage(stored.attachment)
+          || stored.bytes == null
+          || stored.bytes.length != expected.getInt("byteLength"))
+        throw new IllegalArgumentException(IMAGE_ERROR);
+      for (String field : new String[] {"id", "mimeType", "byteLength", "width", "height"}) {
+        boolean matches =
+            field.equals("id") || field.equals("mimeType")
+                ? expected.get(field).equals(stored.attachment.get(field))
+                : expected.getLong(field) == stored.attachment.getLong(field);
+        if (!matches) throw new IllegalArgumentException(IMAGE_ERROR);
+      }
+      rawBytes += stored.bytes.length;
+      if (rawBytes > 3 * MAX_IMAGE_BYTES) throw new IllegalArgumentException(IMAGE_ERROR);
+      String url =
+          "data:"
+              + stored.attachment.getString("mimeType")
+              + ";base64,"
+              + encodeImage(stored.bytes, token);
+      wire.put(
+          object(
+              "role",
+              "user",
+              "content",
+              new JSONArray()
+                  .put(object("type", "text", "text", text.getString("content")))
+                  .put(
+                      object(
+                          "type",
+                          "image_url",
+                          "image_url",
+                          object("url", url, "detail", "original")))));
+      sent.add(expected.getString("id"));
+    }
+    body.put("messages", wire);
+    checkCancelled(token);
+    if (utf8(body.toString()) > MAX_IMAGE_PROVIDER_BYTES) throw new IllegalArgumentException(INPUT);
+    JSONArray omitted = new JSONArray();
+    for (String imageId : allIds) if (!sent.contains(imageId)) omitted.put(imageId);
+    return new PreparedImageRequest(body, omitted);
   }
 
   static int utf8(String s) {
@@ -246,6 +542,12 @@ public final class ConnectionService {
   static JSONObject modelRequest(
       JSONObject request, JSONObject persona, String selected, boolean deepseek) {
     JSONArray recent = validateMessages(request);
+    if (hasImages(request)) throw new IllegalArgumentException(INPUT);
+    return buildTextRequest(recent, persona, selected, deepseek);
+  }
+
+  private static JSONObject buildTextRequest(
+      JSONArray recent, JSONObject persona, String selected, boolean deepseek) {
     JSONObject clean = new JSONObject();
     try {
       if (persona == null) throw new Exception();
@@ -317,14 +619,23 @@ public final class ConnectionService {
   }
 
   public JSONObject chat(JSONObject request, JSONObject persona, String id) throws Exception {
-    validateMessages(request);
+    if (hasImages(request)) validateShapes(request);
+    else validateMessages(request);
     if (id == null || !id.matches("[a-zA-Z0-9-]{1,64}")) throw new IllegalArgumentException(INPUT);
     final String u, k, m;
     final NativeHttp.Cancellation token;
     synchronized (this) {
       if (configuring || !active.isEmpty()) throw new IllegalArgumentException("正在等待回复，请稍等。");
-      if (!enabled || key == null || model.isEmpty())
-        return object("content", "这是演示回复。你可以慢慢说，我会陪你聊一会儿。", "mode", "demo");
+      if (!enabled || key == null || model.isEmpty()) {
+        if (hasImages(request)) throw new IllegalArgumentException("演示模式暂不支持图片聊天，请先连接支持图片的服务。");
+        return object(
+            "content",
+            "这是演示回复。你可以慢慢说，我会陪你聊一会儿。",
+            "mode",
+            "demo",
+            "omittedImageIds",
+            new JSONArray());
+      }
       u = baseUrl;
       k = key;
       m = model;
@@ -332,16 +643,19 @@ public final class ConnectionService {
       active.put(id, token);
     }
     try {
-      JSONObject body =
-          modelRequest(
+      PreparedImageRequest prepared =
+          prepareImageModelRequest(
               request,
               persona,
               m,
               host(u).equals("api.deepseek.com")
-                  || m.toLowerCase(Locale.ROOT).matches("^deepseek[-/].*"));
+                  || m.toLowerCase(Locale.ROOT).matches("^deepseek[-/].*"),
+              images,
+              token);
+      JSONObject body = prepared.body;
       String text = finalText(http.request(u + "/chat/completions", k, body, token));
       if (token.cancelled) throw new IllegalArgumentException("已取消这次连接。");
-      return object("content", text, "mode", "live");
+      return object("content", text, "mode", "live", "omittedImageIds", prepared.omittedImageIds);
     } finally {
       synchronized (this) {
         active.remove(id);

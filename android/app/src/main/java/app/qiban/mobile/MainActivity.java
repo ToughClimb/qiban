@@ -125,8 +125,8 @@ public class MainActivity extends BridgeActivity {
 
   WebResourceResponse packagedResponse(WebResourceRequest request) {
     String url = request.getUrl().toString();
-    // Bounded PNG data URLs are the native avatar representation; CSP restricts them to images.
-    if (!request.isForMainFrame() && "GET".equals(request.getMethod()) && inlinePng(url))
+    // Bounded static image previews stay data-only subresources; CSP restricts them to images.
+    if (!request.isForMainFrame() && "GET".equals(request.getMethod()) && inlineImage(url))
       return null;
     String path = packagedPath(url);
     if (path == null
@@ -172,9 +172,89 @@ public class MainActivity extends BridgeActivity {
 
   static final String DENIED_ERROR = "此功能不可用。";
 
-  static boolean inlinePng(String url) {
-    return url.length() <= 1400000
-        && url.matches("data:image/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}");
+  private static final int MAX_INLINE_IMAGE_BYTES = 1024 * 1024;
+  private static final Pattern INLINE_IMAGE =
+      Pattern.compile("data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})");
+
+  static boolean inlineImage(String url) {
+    if (url == null || url.length() > 1400000) return false;
+    Matcher match = INLINE_IMAGE.matcher(url);
+    if (!match.matches()) return false;
+    try {
+      byte[] bytes = android.util.Base64.decode(match.group(2), android.util.Base64.DEFAULT);
+      if (bytes.length == 0
+          || bytes.length > MAX_INLINE_IMAGE_BYTES
+          || !android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+              .equals(match.group(2))) return false;
+      String type = match.group(1);
+      if (type.equals("png") && !staticPng(bytes)) return false;
+      if (type.equals("webp") && !staticWebp(bytes)) return false;
+      if (type.equals("jpeg")
+          && !(bytes.length >= 4
+              && bytes[0] == (byte) 255
+              && bytes[1] == (byte) 216
+              && bytes[2] == (byte) 255
+              && bytes[bytes.length - 2] == (byte) 255
+              && bytes[bytes.length - 1] == (byte) 217)) return false;
+      android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+      bounds.inJustDecodeBounds = true;
+      android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+      return bounds.outWidth > 0
+          && bounds.outHeight > 0
+          && bounds.outWidth <= 1600
+          && bounds.outHeight <= 1600
+          && ("image/" + type).equals(bounds.outMimeType);
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  private static boolean staticPng(byte[] bytes) {
+    if (bytes.length < 33
+        || !Arrays.equals(
+            Arrays.copyOf(bytes, 8), new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10}))
+      return false;
+    int offset = 8;
+    boolean first = true, image = false;
+    while (offset <= bytes.length - 12) {
+      long length = java.nio.ByteBuffer.wrap(bytes, offset, 4).getInt() & 0xffffffffL;
+      if (length > bytes.length - offset - 12) return false;
+      String chunk = new String(bytes, offset + 4, 4, StandardCharsets.US_ASCII);
+      if (first && (!chunk.equals("IHDR") || length != 13)) return false;
+      first = false;
+      if (chunk.equals("acTL") || chunk.equals("fcTL") || chunk.equals("fdAT")) return false;
+      if (chunk.equals("IDAT")) image = true;
+      offset += (int) length + 12;
+      if (chunk.equals("IEND")) return length == 0 && offset == bytes.length && image;
+    }
+    return false;
+  }
+
+  private static boolean staticWebp(byte[] bytes) {
+    if (bytes.length < 20
+        || !"RIFF".equals(new String(bytes, 0, 4, StandardCharsets.US_ASCII))
+        || !"WEBP".equals(new String(bytes, 8, 4, StandardCharsets.US_ASCII))) return false;
+    long declared =
+        java.nio.ByteBuffer.wrap(bytes, 4, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt()
+            & 0xffffffffL;
+    if (declared != bytes.length - 8) return false;
+    int offset = 12;
+    boolean image = false;
+    while (offset <= bytes.length - 8) {
+      String chunk = new String(bytes, offset, 4, StandardCharsets.US_ASCII);
+      long length =
+          java.nio.ByteBuffer.wrap(bytes, offset + 4, 4)
+                  .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                  .getInt()
+              & 0xffffffffL;
+      if (length > bytes.length - offset - 8) return false;
+      if (chunk.equals("ANIM")
+          || chunk.equals("ANMF")
+          || (chunk.equals("VP8X") && (length < 1 || (bytes[offset + 8] & 2) != 0))) return false;
+      if (chunk.equals("VP8 ") || chunk.equals("VP8L")) image = true;
+      offset += 8 + (int) length + ((int) length & 1);
+    }
+    return offset == bytes.length && image;
   }
 
   /** Known core calls reject explicitly; none retains filesystem/network/cookie authority. */

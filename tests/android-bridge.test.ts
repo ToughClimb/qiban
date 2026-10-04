@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { createAndroidBridge, type AndroidPlugin } from "../src/android/bridge";
 import type { ConnectionStatus, Result } from "../shared/desktop";
 import type { CardFields } from "../shared/cards";
+import type { ChatRequest } from "../shared/characters";
+import type { ChatImageDraft } from "../shared/image-chat";
 
 const id = "card-11111111-1111-1111-1111-111111111111";
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
@@ -68,6 +70,7 @@ function fixture() {
     },
   } as unknown as AndroidPlugin;
   return {
+    native,
     bridge: createAndroidBridge(native),
     change: (value: string) => {
       raw = value;
@@ -89,6 +92,137 @@ test("Android import requires explicit acknowledgement and preserves source meta
   assert.equal(f.saved(), "");
   assert.equal((await f.bridge.saveCard(preview.value.token, true)).ok, true);
   assert.equal(f.saved(), original);
+});
+
+const chatImage = (number: number) => ({
+  id: `image-${String(number).padStart(8, "0")}-1111-1111-1111-111111111111`,
+  mimeType: "image/jpeg" as const,
+  byteLength: 3,
+  width: 1,
+  height: 1,
+});
+test("Android image selection and previews stay local and reject remote/opaque data", async () => {
+  const f = fixture();
+  let selected: ChatImageDraft | null = {
+    image: chatImage(1),
+    previewUrl: "data:image/jpeg;base64,/9j/",
+  };
+  let picks = 0,
+    sends = 0,
+    discarded = "";
+  f.native.pickChatImage = async () => {
+    picks++;
+    return ok(selected);
+  };
+  f.native.chatImagePreview = async () => ok(selected?.previewUrl ?? null);
+  f.native.discardChatImage = async (input) => {
+    discarded = input.imageId;
+    return ok(undefined);
+  };
+  f.native.chat = async () => {
+    sends++;
+    return ok({ content: "你好", mode: "demo" });
+  };
+  assert.deepEqual(await f.bridge.pickChatImage("lin"), ok(selected));
+  assert.deepEqual(
+    await f.bridge.chatImagePreview("lin", chatImage(1).id),
+    ok(selected.previewUrl),
+  );
+  assert.equal(sends, 0);
+  assert.equal((await f.bridge.pickChatImage("../other")).ok, false);
+  assert.equal(picks, 1);
+  for (const previewUrl of [
+    "https://example.invalid/photo.jpg",
+    "file:///private/photo.jpg",
+    "data:image/svg+xml;base64,AAAA",
+    "data:image/png;base64,AAAA",
+  ]) {
+    selected = { image: chatImage(1), previewUrl };
+    assert.equal((await f.bridge.pickChatImage("lin")).ok, false);
+  }
+  selected = null;
+  assert.deepEqual(await f.bridge.pickChatImage("lin"), ok(null));
+  assert.equal(
+    (await f.bridge.discardChatImage("lin", chatImage(1).id)).ok,
+    true,
+  );
+  assert.equal(discarded, chatImage(1).id);
+  assert.equal(
+    (await f.bridge.discardChatImage("lin", "../../private")).ok,
+    false,
+  );
+});
+
+test("Android image context sends references only and merges omission IDs without mutating history", async () => {
+  const f = fixture();
+  let sent: ChatRequest | undefined;
+  f.native.chat = async (input) => {
+    sent = input.request;
+    return ok({
+      content: "合成回复",
+      mode: "live",
+      omittedImageIds: [chatImage(2).id],
+    });
+  };
+  const messages: ChatRequest["messages"] = [];
+  for (let i = 1; i <= 4; i++) {
+    messages.push({
+      role: "user",
+      content: i === 4 ? "" : "测试",
+      image: chatImage(i),
+    });
+    if (i < 4) messages.push({ role: "assistant", content: "回复" });
+  }
+  const request = { characterId: "lin", messages };
+  const before = JSON.stringify(request);
+  const reply = await f.bridge.chat(request, "synthetic-images");
+  assert.ok(reply.ok);
+  assert.deepEqual(reply.value.omittedImageIds, [
+    chatImage(1).id,
+    chatImage(2).id,
+  ]);
+  assert.equal(sent!.messages.filter((m) => m.image).length, 3);
+  assert.deepEqual(sent!.messages[0], {
+    role: "user",
+    content: "测试",
+    imageOmitted: true,
+  });
+  assert.equal(JSON.stringify(sent).includes("data:image"), false);
+  assert.equal(JSON.stringify(request), before);
+});
+
+test("Android rejects malformed attachment/omission replies before exposing them", async () => {
+  const f = fixture();
+  let sends = 0;
+  f.native.chat = async () => {
+    sends++;
+    return ok({
+      content: "回复",
+      mode: "live",
+      omittedImageIds: [chatImage(99).id],
+    });
+  };
+  const request = {
+    characterId: "lin",
+    messages: [{ role: "user" as const, content: "测试", image: chatImage(1) }],
+  };
+  assert.equal((await f.bridge.chat(request, "bad-reply")).ok, false);
+  assert.equal(sends, 1);
+  assert.equal(
+    (
+      await f.bridge.chat(
+        {
+          characterId: "lin",
+          messages: [
+            { role: "assistant", content: "错误", image: chatImage(1) },
+          ],
+        },
+        "bad-input",
+      )
+    ).ok,
+    false,
+  );
+  assert.equal(sends, 1);
 });
 
 test("Android avatars use native-only PNG data and never become persona or card source", async () => {

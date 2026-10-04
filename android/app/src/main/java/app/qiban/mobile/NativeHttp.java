@@ -134,6 +134,7 @@ public final class NativeHttp {
             .followSslRedirects(false)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(timeout, TimeUnit.MILLISECONDS)
+            .writeTimeout(timeout, TimeUnit.MILLISECONDS)
             .callTimeout(timeout, TimeUnit.MILLISECONDS)
             .dns(
                 host -> {
@@ -157,9 +158,13 @@ public final class NativeHttp {
             .url(url)
             .header("Authorization", "Bearer " + key)
             .header("Accept", "application/json");
-    if (body != null)
-      builder.post(
-          RequestBody.create(body.toString(), MediaType.get("application/json; charset=utf-8")));
+    if (body != null) {
+      String json = body.toString();
+      if (ConnectionService.utf8(json) > ConnectionService.MAX_IMAGE_PROVIDER_BYTES)
+        throw new Failure("input", "消息与图片过大，请编辑后重试。");
+      if (token.cancelled) throw new Failure("cancelled", "已取消这次连接。");
+      builder.post(RequestBody.create(json, MediaType.get("application/json; charset=utf-8")));
+    }
     Call call = client.newCall(builder.build());
     token.call = call;
     if (token.cancelled) call.cancel();
