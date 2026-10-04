@@ -14,7 +14,11 @@ const adb = (...args) =>
 const pause = () => new Promise((resolve) => setTimeout(resolve, 2000));
 const target = join(process.env.RUNNER_TEMP ?? "/tmp", "qiban-emulator-ui.xml");
 function ui() {
-  adb("shell", "uiautomator", "dump", "/sdcard/qiban-smoke.xml");
+  // A freshly booted emulator may not yet expose an accessibility root. Retry
+  // within the bounded caller loop, without reusing an older dump as evidence.
+  adb("shell", "rm", "-f", "/sdcard/qiban-smoke.xml");
+  const result = adb("shell", "uiautomator", "dump", "/sdcard/qiban-smoke.xml");
+  if (!result.includes("dumped to:")) return "";
   adb("pull", "/sdcard/qiban-smoke.xml", target);
   return readFileSync(target, "utf8");
 }
@@ -50,13 +54,27 @@ assert.match(
 );
 let xml = "",
   position;
+const display = adb("shell", "wm", "size").match(
+  /(?:Override|Physical) size: (\d+)x(\d+)/,
+);
+assert.ok(display, "Emulator display dimensions must be available");
+const [width, height] = display.slice(1).map(Number);
 for (let attempt = 0; attempt < 20; attempt++) {
   await pause();
   xml = ui();
   position = button(xml, "先用演示聊天");
   if (position) break;
   if (attempt > 5)
-    adb("shell", "input", "swipe", "540", "1700", "540", "800", "300");
+    adb(
+      "shell",
+      "input",
+      "swipe",
+      String(Math.round(width / 2)),
+      String(Math.round(height * 0.8)),
+      String(Math.round(width / 2)),
+      String(Math.round(height * 0.4)),
+      "300",
+    );
 }
 assert.ok(position, "Android onboarding must render its native-demo control");
 adb("shell", "input", "tap", ...position.map(String));
