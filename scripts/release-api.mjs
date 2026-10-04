@@ -6,6 +6,7 @@ import { ASSET_NAMES, REPOSITORY, REPOSITORY_ID, releaseIdentity, verifyDraft, v
 const identity = releaseIdentity(process.env);
 const token = process.env.GH_TOKEN;
 const runId = process.env.GITHUB_RUN_ID;
+const platforms = identity.scope === "windows" ? ["windows"] : ["windows", "android"];
 if (!token || !/^\d+$/.test(runId ?? "")) throw new Error("Release job needs its ephemeral GITHUB_TOKEN and run identity.");
 const root = `https://api.github.com/repos/${REPOSITORY}`;
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -48,16 +49,16 @@ if (command === "preflight") {
   if (tag?.object?.type !== "commit" || tag.object.sha !== identity.commit)
     throw new Error("Release needs an existing lightweight tag at the exact reviewed SHA.");
   const runs = await request(`/actions/runs?head_sha=${identity.commit}&per_page=100`);
-  for (const name of ["Windows desktop verification", "Android checks"]) {
+  for (const name of identity.scope === "windows" ? ["Windows desktop verification"] : ["Windows desktop verification", "Android checks"]) {
     const run = runs?.workflow_runs?.find(run => run.name === name && run.event === "push");
     if (!run || run.head_sha !== identity.commit || run.status !== "completed" || run.conclusion !== "success")
       throw new Error(`Exact-SHA ${name} must pass before the release tag is pushed.`);
     const jobs = await request(`/actions/runs/${run.id}/jobs`);
     if (!jobs?.jobs?.length || jobs.jobs.some(job => job.conclusion !== "success"))
       throw new Error("Required exact-SHA verification jobs did not pass.");
-    if (name === "Windows desktop verification" && !jobs.jobs.some(job => job.steps.some(step =>
-      step.name === "Image chat UI regressions" && step.conclusion === "success")))
-      throw new Error("Exact-SHA image chat UI verification is required before release.");
+    if (name === "Windows desktop verification" && ["Image chat UI regressions", "Native packaged image chat"].some(required =>
+      !jobs.jobs.some(job => job.steps.some(step => step.name === required && step.conclusion === "success"))))
+      throw new Error("Exact-SHA image UI and actual packaged native image verification are required before release.");
     if (name === "Android checks" && !jobs.jobs.some(job => job.steps.some(step =>
       step.name === "API35 installation and native demo smoke" && step.conclusion === "success")))
       throw new Error("Exact-SHA API35 emulator verification is required; a skipped emulator is insufficient.");
@@ -70,12 +71,13 @@ if (command === "preflight") {
     // This intended draft is also the early write-permission check. It is never a throwaway probe release.
     release = await request("/releases", "POST", {
       tag_name: identity.tag, target_commitish: identity.commit,
-      name: `栖伴 Qiban ${identity.version} preview`, draft: true, prerelease: true,
+      name: `栖伴 Qiban ${identity.version} ${identity.scope === "windows" ? "Windows " : ""}preview`, draft: true, prerelease: true,
       generate_release_notes: false, make_latest: "false",
       body: `Reviewed commit: ${identity.commit}\n\nBuilds and asset verification are pending.`,
     });
   }
   verifyDraft(release, identity);
+  await appendFile(process.env.GITHUB_OUTPUT, `scope=${identity.scope}\n`);
   console.log(`PASS release preflight: repository ID, reviewed tag, exact-SHA CI/emulator and draft contents-write permission. ${identity.commit}`);
 } else if (command === "upload") {
   const platform = process.argv[3];
@@ -101,7 +103,7 @@ if (command === "preflight") {
   const release = await draft();
   const expected = [];
   const manifests = [];
-  for (const platform of Object.keys(ASSET_NAMES)) {
+  for (const platform of platforms) {
     const manifest = JSON.parse(process.env[`QIBAN_${platform.toUpperCase()}_MANIFEST`] ?? "null");
     verifyManifest(manifest ?? {}, identity, platform, runId);
     const bytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n");
@@ -119,7 +121,8 @@ if (command === "preflight") {
     `虚拟角色与宠物聊天。本地演示不调用模型；真实聊天须在应用内配置自己的兼容服务。\n\n` +
     `Commit: \`${identity.commit}\`\nVerification/build: https://github.com/${REPOSITORY}/actions/runs/${runId}\n\n` +
     `Windows x64 installer/ZIP are unsigned. No update feed is configured. Standard-user/SmartScreen/Chinese IME acceptance is not established by hosted CI.\n\n` +
-    `Android APK is an installable debug/test build with a disposable public test certificate. No stable signing identity or future upgrade compatibility is promised. API35 emulator verification is required; this is not physical-device acceptance.\n\n` +
+    (identity.scope === "windows" ? `This prerelease delivers Windows only. Android image chat remains under verification; no Android APK is included or claimed here.\n\n` :
+      `Android APK is an installable debug/test build with a disposable public test certificate. No stable signing identity or future upgrade compatibility is promised. API35 emulator verification is required; this is not physical-device acceptance.\n\n`) +
     `Only offline/synthetic and unpaid transport checks run in this workflow. It performs no paid inference. Full third-party notices are included in packages and supplied below.\n\n` +
     `Windows uninstall removes known Qiban stores; residual Chromium files have not been audited and may contain private metadata.\n\n` +
     `| Asset | Bytes | SHA256 |\n| --- | ---: | --- |\n${table}\n`;

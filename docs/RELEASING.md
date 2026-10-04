@@ -11,6 +11,8 @@ git tag "qiban-preview-${preview_version}-${reviewed_sha}" "$reviewed_sha"
 git push origin "refs/tags/qiban-preview-${preview_version}-${reviewed_sha}"
 ```
 
+A separately approved Windows-only delivery uses `qiban-preview-windows-<package-version>-<40-character-commit-SHA>`. It requires all exact-SHA Windows checks, including `Image chat UI regressions` and `Native packaged image chat`, and uploads only Windows assets. It does not deliver an APK or claim Android image acceptance. The combined tag still requires exact-SHA Android CI and emulator acceptance. Do not substitute a Windows-only tag for an approval to publish both platforms.
+
 Do not overwrite or move a release tag. The workflow verifies repository ID `1404734947`, its public visibility, the exact lightweight tag target, and passing Windows/Android push CI for that commit. Android emulator acceptance must have run; a skipped emulator is insufficient.
 
 ## Permission check before builds

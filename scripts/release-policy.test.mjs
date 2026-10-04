@@ -10,7 +10,18 @@ test("publication requires the repository, tag and exact reviewed SHA together",
     { GITHUB_REF: "refs/heads/feat/qiban-mvp" }, { GITHUB_SHA: "b".repeat(40) }]) {
     assert.throws(() => releaseIdentity({ ...environment, ...changes }), /Release gate/);
   }
-  assert.deepEqual(identity, { commit, tag: `qiban-preview-0.1.0-${commit}`, version: "0.1.0" });
+  assert.deepEqual(identity, { commit, tag: `qiban-preview-0.1.0-${commit}`, version: "0.1.0", scope: "both" });
+});
+
+test("a separately reviewed Windows-only tag cannot publish Android assets or borrow a combined manifest", () => {
+  const windows = releaseIdentity({ ...environment, GITHUB_REF: `refs/tags/qiban-preview-windows-0.1.0-${commit}` });
+  assert.equal(windows.scope, "windows");
+  const manifest = { schema_version: 1, ...windows, platform: "windows", run_id: "123", package_checks_passed: true,
+    assets: ASSET_NAMES.windows.map(name => ({ name, size: 100, sha256: "c".repeat(64) })) };
+  verifyManifest(manifest, windows, "windows", "123");
+  assert.throws(() => verifyManifest({ ...manifest, scope: "both" }, windows, "windows", "123"));
+  assert.throws(() => verifyManifest({ ...manifest, platform: "android" }, windows, "android", "123"));
+  assert.throws(() => releaseIdentity({ ...environment, GITHUB_REF: `refs/tags/qiban-preview-android-0.1.0-${commit}` }));
 });
 
 test("existing public releases, foreign builds and altered asset bytes fail closed", () => {

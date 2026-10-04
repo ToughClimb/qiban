@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const identity = releaseIdentity(process.env);
 const runId = process.env.GITHUB_RUN_ID;
 const [command, platform] = process.argv.slice(2);
-if (!ASSET_NAMES[platform] || !/^\d+$/.test(runId ?? "") ||
+if (!ASSET_NAMES[platform] || (identity.scope === "windows" && platform !== "windows") || !/^\d+$/.test(runId ?? "") ||
     execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() !== identity.commit ||
     JSON.parse(await readFile("package.json", "utf8")).version !== identity.version) {
   throw new Error("Package provenance does not match the reviewed checkout/version.");
