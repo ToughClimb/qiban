@@ -3,6 +3,7 @@ module.exports = {
     asar: true,
     executableName: "Qiban",
     icon: "build/qiban.ico",
+    extraResource: ["desktop-build/THIRD_PARTY_NOTICES.txt"],
     win32metadata: {
       CompanyName: "Qiban contributors",
       FileDescription: "栖伴 Qiban",
