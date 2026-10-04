@@ -26,12 +26,13 @@ unsigned 输出 `app/build/outputs/apk/release/app-release-unsigned.apk`，不�
 - 连接只支持公开 HTTPS 的 OpenAI 风格 `/models`、`/chat/completions`。禁止账号、查询参数、片段、私有地址、混合 DNS 及跳转；不支持 localhost、自签名证书、代理网关登录页面或工具调用。连接会把选定角色和必要聊天内容发给用户选择的服务；服务方可能收费。开发验证不调用付费 API。
 - 角色 JSON 与聊天写入 `Context.getFilesDir()` 下应用自有 `qiban-data` 区域。路径由 Android 在运行时提供，不承诺外部可浏览路径。角色通过系统文档选择器导入/导出，保留原始 JSON 扩展字段。无需公共存储权限；远程图片不加载。`openCards` 解释私有目录，并引导导出。
 - 编辑仅修改六个人设字段；预览、确认和原子写入保留一份上次有效备份。工具、脚本、提供商/凭据配置被拒绝，卡片的元数据和扩展指令不进入模型上下文。人设素材以低信任用户消息传入，不能覆盖固定原生安全指令。具体 JSON 格式见 [角色卡说明](../docs/CHARACTER_CARDS.md)。
+- 自选头像通过原生系统文件选择器导入 PNG/JPEG/WebP：文件最多5 MiB、宽高最多4096，原生按比例缩至512以内，重新编码静态PNG（最多1 MiB），去掉原始元数据。保存到应用内部 `qiban-avatars`，与稳定角色ID关联，不从角色JSON接受图片URL；不联网取图、不发给模型。头像以受验证的PNG data URL交给前端，删除头像恢复内置/默认头像。头像与一份上次有效备份合计最多8 MiB；删除角色/全部本机数据一并删除头像及备份。角色JSON导出不包含头像，卸载前仍需另存原始图片；本版没有完整聊天/头像备份恢复界面。
 - 单卡 128 KiB、100 个角色、角色与备份合计 8 MiB；结构深度16、节点4096、数组128、单字符串16 KiB，并进一步执行共享人设字段限制。聊天最多100个角色、每个200条、每条8000个UTF-16单元、总计4 MiB；损坏文件报错，不静默覆盖。上下文和请求另有32/48 KiB字节预算；响应最多128 KiB，显示最终文本最多8000字符。原生校验是额外边界，共享解析器仍必须通过。
 - 系统自动备份和设备迁移排除应用数据。卸载删除本机数据。先导出需要保留的角色 JSON；本版不提供聊天整包导出/恢复，不把角色导出称为完整备份。“删除密钥”保留聊天，“删除所有本机数据”不可恢复。
 
 ## 接口与验收
 
-`src/android/bridge.ts` 的 `AndroidPlugin` 只允许连接状态/模型选择/原生密钥输入、角色 CRUD 与系统导入导出、历史读写、诊断、聊天和取消。没有任意路径、URL 请求、shell 或 JavaScript 凭据参数。`createAndroidBridge` 适配现有 `DesktopBridge`；共享启动改动只有 `src/main.tsx` 初始化和 `src/App.tsx` 选择 Android 设置面板。
+`src/android/bridge.ts` 的 `AndroidPlugin` 只允许连接状态/模型选择/原生密钥输入、角色 CRUD 与系统导入导出、头像选择/删除、历史读写、诊断、聊天和取消。没有任意路径、URL 请求、shell 或 JavaScript 凭据参数。`createAndroidBridge` 适配现有 `DesktopBridge`，实现已协调的 `importAvatar(id): Promise<Result<string|null>>`、`deleteAvatar(id): Promise<Result<void>>`；取消选择返回null。`cards()` 的 `avatarUrl` 仅来自原生验证后的PNG，不来自卡片源JSON。共享可选类型和头像UI由Windows/视觉工作流负责合入；本分支不修改共享类型。共享启动改动只有 `src/main.tsx` 初始化和 `src/App.tsx` 选择 Android 设置面板。
 
 WebView 只允许打包的 `https://localhost` 资源，拒绝远程导航、弹窗和子资源；CSP 禁止网页网络连接，关闭调试、明文混合资源、文件/内容 URL 访问。只申请 INTERNET 权限。
 

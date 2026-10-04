@@ -19,7 +19,15 @@ import { parseCharacterCard } from "../../shared/character-card";
 import type { Conversations } from "../../shared/history";
 import { personalities } from "../../server/personas";
 
-type NativeCards = { cards: { id: string; raw: string }[]; issues: string[] };
+type NativeCards = {
+  cards: { id: string; raw: string }[];
+  issues: string[];
+  avatarUrls?: Record<string, string>;
+};
+export type AndroidBridge = DesktopBridge & {
+  importAvatar(id: string): Promise<Result<string | null>>;
+  deleteAvatar(id: string): Promise<Result<void>>;
+};
 export interface AndroidPlugin {
   status(): Promise<Result<ConnectionStatus>>;
   connect(input: {
@@ -37,6 +45,8 @@ export interface AndroidPlugin {
   deleteCard(input: { id: string }): Promise<Result<void>>;
   exportCard(input: { id: string }): Promise<Result<void>>;
   openCards(): Promise<Result<void>>;
+  importAvatar(input: { id: string }): Promise<Result<string | null>>;
+  deleteAvatar(input: { id: string }): Promise<Result<void>>;
   loadHistory(): Promise<Result<Conversations>>;
   saveHistory(input: { history: Conversations }): Promise<Result<void>>;
   dataPath(): Promise<Result<string>>;
@@ -57,6 +67,10 @@ declare global {
 const failure = <T>(error: string): Result<T> => ({ ok: false, error });
 const customId =
   /^card-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const validAvatarUrl = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value.length <= 1_400_000 &&
+  /^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(value);
 const sourceNames: Record<keyof CardFields, string> = {
   name: "name",
   description: "description",
@@ -67,7 +81,7 @@ const sourceNames: Record<keyof CardFields, string> = {
 };
 
 /** Fixed operations only; raw sources are retained separately from runtime personas. */
-export function createAndroidBridge(native: AndroidPlugin): DesktopBridge {
+export function createAndroidBridge(native: AndroidPlugin): AndroidBridge {
   const sources = new Map<string, string>();
   let pending:
     | {
@@ -133,7 +147,7 @@ export function createAndroidBridge(native: AndroidPlugin): DesktopBridge {
     async cards() {
       const result = await reload();
       if (!result.ok) return result;
-      const list: Character[] = [...characters];
+      const list: (Character & { avatarUrl?: string })[] = [...characters];
       for (const [id, raw] of sources) {
         const parsed = parseCharacterCard(raw);
         if (!parsed.ok) continue;
@@ -149,6 +163,10 @@ export function createAndroidBridge(native: AndroidPlugin): DesktopBridge {
           greeting: persona.firstMessage || "你好，今天想聊点什么？",
           starters: ["今天过得怎么样？", "聊一件小事"],
         });
+      }
+      for (let i = 0; i < list.length; i++) {
+        const avatarUrl = result.value.avatarUrls?.[list[i].id];
+        if (validAvatarUrl(avatarUrl)) list[i] = { ...list[i], avatarUrl };
       }
       return {
         ok: true,
@@ -225,6 +243,19 @@ export function createAndroidBridge(native: AndroidPlugin): DesktopBridge {
     exportCard: (id) => native.exportCard({ id }),
     deleteCard: (id) => native.deleteCard({ id }),
     openCards: () => native.openCards(),
+    async importAvatar(id) {
+      if (!getCharacter(id) && !customId.test(id))
+        return failure("角色标识无效。");
+      const result = await native.importAvatar({ id });
+      if (!result.ok || result.value === null) return result;
+      return validAvatarUrl(result.value)
+        ? result
+        : failure("头像格式不符合本版要求。");
+    },
+    deleteAvatar: (id) =>
+      getCharacter(id) || customId.test(id)
+        ? native.deleteAvatar({ id })
+        : Promise.resolve(failure("角色标识无效。")),
     loadHistory: () => native.loadHistory(),
     saveHistory: (history) => native.saveHistory({ history }),
     dataPath: () => native.dataPath(),

@@ -29,6 +29,7 @@ function fixture() {
   let saved = "";
   let calls = 0;
   let persona: CardFields | undefined;
+  let avatar: string | null = null;
   const state: ConnectionStatus = {
     mode: "demo",
     baseUrl: "https://example.invalid/v1",
@@ -39,7 +40,12 @@ function fixture() {
     needsSelection: false,
   };
   const native = {
-    listCards: async () => ok({ cards: [{ id, raw }], issues: [] }),
+    listCards: async () =>
+      ok({
+        cards: [{ id, raw }],
+        issues: [],
+        avatarUrls: avatar ? { [id]: avatar } : {},
+      }),
     importCard: async () => ok({ raw }),
     saveCard: async (input: { raw: string }) => {
       saved = input.raw;
@@ -50,6 +56,11 @@ function fixture() {
     connect: async () => {
       calls++;
       return ok(state);
+    },
+    importAvatar: async () => ok(avatar),
+    deleteAvatar: async () => {
+      avatar = null;
+      return ok(undefined);
     },
     chat: async (input: { persona: CardFields }) => {
       persona = input.persona;
@@ -64,6 +75,9 @@ function fixture() {
     saved: () => saved,
     calls: () => calls,
     persona: () => persona,
+    avatar: (value: string | null) => {
+      avatar = value;
+    },
   };
 }
 
@@ -75,6 +89,62 @@ test("Android import requires explicit acknowledgement and preserves source meta
   assert.equal(f.saved(), "");
   assert.equal((await f.bridge.saveCard(preview.value.token, true)).ok, true);
   assert.equal(f.saved(), original);
+});
+
+test("Android avatars use native-only PNG data and never become persona or card source", async () => {
+  const f = fixture();
+  const png =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ9kAAAAASUVORK5CYII=";
+  assert.deepEqual(await f.bridge.importAvatar(id), ok(null));
+  f.avatar(png);
+  assert.deepEqual(await f.bridge.importAvatar(id), ok(png));
+  let cards = await f.bridge.cards();
+  assert.ok(cards.ok);
+  assert.equal(
+    (cards.value.characters.find((c) => c.id === id) as { avatarUrl?: string })
+      .avatarUrl,
+    png,
+  );
+  await f.bridge.chat(
+    { characterId: id, messages: [{ role: "user", content: "你好" }] },
+    "avatar-chat",
+  );
+  assert.equal(JSON.stringify(f.persona()).includes("data:image"), false);
+  assert.equal((await f.bridge.editFields(id)).ok, true);
+  for (const bad of [
+    "https://remote.example/avatar.png",
+    "file:///private/avatar.png",
+    "data:image/svg+xml;base64,AAAA",
+  ]) {
+    f.avatar(bad);
+    assert.equal((await f.bridge.importAvatar(id)).ok, false);
+    cards = await f.bridge.cards();
+    assert.ok(cards.ok);
+    assert.equal(
+      (
+        cards.value.characters.find((c) => c.id === id) as {
+          avatarUrl?: string;
+        }
+      ).avatarUrl,
+      undefined,
+    );
+  }
+  assert.equal((await f.bridge.importAvatar("../../outside")).ok, false);
+  await f.bridge.deleteAvatar(id);
+  assert.deepEqual(await f.bridge.importAvatar(id), ok(null));
+  f.change(
+    JSON.stringify({
+      ...JSON.parse(original),
+      avatarUrl: "https://remote.example/avatar.png",
+    }),
+  );
+  cards = await f.bridge.cards();
+  assert.ok(cards.ok);
+  assert.equal(
+    (cards.value.characters.find((c) => c.id === id) as { avatarUrl?: string })
+      .avatarUrl,
+    undefined,
+  );
 });
 
 test("Android edits preserve opaque fields and reject a stale preview", async () => {
