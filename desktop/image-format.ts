@@ -1,4 +1,5 @@
 import { ConnectionError } from "./network.js";
+import { crc32 } from "node:zlib";
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_AVATAR_BYTES = 1024 * 1024;
 const pngSignature = Buffer.from("89504e470d0a1a0a", "hex");
@@ -17,6 +18,7 @@ export function pngChunks(bytes: Buffer) {
     const size = bytes.readUInt32BE(position);
     const end = position + size + 12;
     if (end > bytes.length) imageError();
+    if (crc32(bytes.subarray(position + 4, end - 4)) !== bytes.readUInt32BE(end - 4)) imageError();
     const kind = bytes.toString("ascii", position + 4, position + 8);
     if (kind === "acTL" || kind === "fdAT") imageError();
     chunks.push({ kind, bytes: bytes.subarray(position, end) });

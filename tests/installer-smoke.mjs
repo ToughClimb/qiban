@@ -121,7 +121,7 @@ try {
   await mkdir(join(dataRoot, "cards"), { recursive: true });
   await mkdir(join(dataRoot, "avatars"), { recursive: true });
   await writeFile(join(dataRoot, "avatars", `${cardId}.png`), Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=", "base64"));
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwSQv4DwAD5gH6hp8d8QAAAABJRU5ErkJggg==", "base64"));
   await writeFile(
     join(dataRoot, "cards", `${cardId}.json`),
     JSON.stringify({

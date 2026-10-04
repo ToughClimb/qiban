@@ -3,14 +3,16 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { crc32 } from "node:zlib";
 import { AvatarStore, avatarId } from "../desktop/avatars.js";
 import { imageFormat, normalizedPng, MAX_IMAGE_BYTES } from "../desktop/image-format.js";
 import { CardStore } from "../desktop/cards.js";
 import { modelRequest } from "../server/model.js";
-const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=", "base64");
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwSQv4DwAD5gH6hp8d8QAAAABJRU5ErkJggg==", "base64");
 function chunk(kind: string, data: Buffer) {
   const bytes = Buffer.alloc(data.length + 12);
   bytes.writeUInt32BE(data.length); bytes.write(kind, 4, "ascii"); data.copy(bytes, 8);
+  bytes.writeUInt32BE(crc32(bytes.subarray(4, -4)), bytes.length - 4);
   return bytes;
 }
 function webp(width: number, height: number) {
@@ -26,8 +28,10 @@ test("image preflight bounds PNG/JPEG/WebP and rejects active formats and animat
   const jpeg = Buffer.from([0xff,0xd8,0xff,0xc0,0,8,8,0,32,0,64,0,0xff,0xda,0,2]);
   assert.deepEqual(imageFormat(jpeg), { mime: "image/jpeg", width: 64, height: 32 });
   const largePng = Buffer.from(png); largePng.writeUInt32BE(4097, 16);
+  largePng.writeUInt32BE(crc32(largePng.subarray(12, 29)), 29);
+  const corrupt = Buffer.from(png); corrupt[corrupt.length - 1] ^= 1;
   const animated = Buffer.concat([png.subarray(0, 33), chunk("acTL", Buffer.alloc(8)), png.subarray(33)]);
-  for (const bytes of [largePng, animated, webp(4097, 1), Buffer.alloc(MAX_IMAGE_BYTES + 1), Buffer.from("<svg onload='alert(1)'/>"), Buffer.from("<html/>"), Buffer.from([0xff,0xd8,0xff,0xff])])
+  for (const bytes of [largePng, corrupt, animated, webp(4097, 1), Buffer.alloc(MAX_IMAGE_BYTES + 1), Buffer.from("<svg onload='alert(1)'/>"), Buffer.from("<html/>"), Buffer.from([0xff,0xd8,0xff,0xff])])
     assert.throws(() => imageFormat(bytes));
   for (const id of ["../lin", "lin/../../outside", "new", "card-invalid", "https://remote.invalid/avatar.png", {}, null])
     assert.throws(() => avatarId(id));
