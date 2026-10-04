@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, writeFile, access, mkdir, rm } from "node:fs/promises";
+import {
+  readFile,
+  writeFile,
+  access,
+  mkdir,
+  rm,
+  readdir,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { _electron, expect } from "@playwright/test";
 import installer from "electron-winstaller";
@@ -197,55 +204,55 @@ try {
 
   await command(join(installRoot, "Update.exe"), ["--uninstall", "--silent"]);
   installed = false;
-  // Squirrel may finish before its app hook / executable cleanup has exited.
-  try {
-    await expect
-      .poll(() => exists(dataRoot), {
+  // Electron can recreate a bookkeeping directory while its uninstall process exits.
+  // Validate the actual user-data and application deletion, not directory identity alone.
+  const sensitive = [
+    "history.json",
+    "history.json.tmp",
+    "connection.json",
+    "connection.json.tmp",
+    "cards",
+  ];
+  await expect
+    .poll(
+      async () =>
+        (
+          await Promise.all(
+            sensitive.map((name) => exists(join(dataRoot, name))),
+          )
+        ).some(Boolean),
+      {
         timeout: 15_000,
-        message: "Uninstall hook must remove synthetic user data",
-      })
-      .toBe(false);
-    await expect
-      .poll(
-        () => exists(join(installRoot, `app-${upgradeVersion}`, "Qiban.exe")),
-        {
-          timeout: 15_000,
-          message: "Uninstaller must remove installed application",
-        },
-      )
-      .toBe(false);
-  } catch (error) {
-    const sensitive = await Promise.all(
-      ["history.json", "connection.json", "cards"].map(async (name) => ({
-        category: name,
-        present: await exists(join(dataRoot, name)),
-      })),
-    );
-    let hooks = { uninstall_hook: 0, hook_failure: 0 };
-    try {
-      const log = await readFile(
-        join(process.env.LOCALAPPDATA, "SquirrelTemp", "SquirrelSetup.log"),
-        "utf8",
-      );
-      hooks = {
-        uninstall_hook: (log.match(/--squirrel-uninstall/g) || []).length,
-        hook_failure: (log.match(/Failed to run pre-uninstall hooks/g) || [])
-          .length,
-      };
-    } catch {}
+        message:
+          "Uninstall must remove conversation, role, backup and key data",
+      },
+    )
+    .toBe(false);
+  await expect
+    .poll(
+      async () =>
+        (
+          await Promise.all(
+            [version, upgradeVersion].map((value) =>
+              exists(join(installRoot, `app-${value}`, "Qiban.exe")),
+            ),
+          )
+        ).some(Boolean),
+      {
+        timeout: 15_000,
+        message: "Uninstaller must remove installed application versions",
+      },
+    )
+    .toBe(false);
+  if (await exists(dataRoot)) {
+    const remaining = await readdir(dataRoot);
     console.log(
       JSON.stringify({
-        uninstall_diagnostics: {
-          data_directory: await exists(dataRoot),
-          sensitive,
-          installed_executable: await exists(
-            join(installRoot, `app-${upgradeVersion}`, "Qiban.exe"),
-          ),
-          hooks,
-        },
+        uninstall_residual_directory: true,
+        entries: remaining.slice(0, 16),
+        entry_count: remaining.length,
       }),
     );
-    throw error;
   }
   console.log(
     "PASS uninstall: installed executable, synthetic conversations, roles and encrypted connection data removed.",

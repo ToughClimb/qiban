@@ -19,7 +19,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Connection setup regressions
+        run: node tests/connection-panel-smoke.mjs
+        env:
+          CHROMIUM_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
       - run: npm run desktop:make
+      - name: Native production HTTPS reachability (unpaid)
+        run: node --import tsx tests/native-provider-reachability.ts
+        timeout-minutes: 1
       - name: Installer lifecycle with synthetic data
         run: node tests/installer-smoke.mjs
         timeout-minutes: 6
