@@ -413,51 +413,71 @@ public final class NativeImageChatSmokeTest {
     }
   }
 
+  private static void awaitRecoveredHistoryUI(ActivityScenario<MainActivity> scenario)
+      throws Exception {
+    NativeOriginStorageSmokeTest.awaitAndroidSettings(scenario);
+    for (int attempt = 0; attempt < 100; attempt++) {
+      if (evaluate(
+              scenario,
+              "String(!!document.querySelector('#message')&&!document.querySelector('#message').disabled&&document.body.textContent.includes('已有回复'))")
+          .equals("true")) return;
+      Thread.sleep(100);
+    }
+    fail(
+        "Missing image must retain visible text and enable the actual composer after history"
+            + " reload");
+  }
+
   @Test
   public void missingImageAfterRestartKeepsBothConversationsEditable() throws Exception {
+    // Seed durable state before mounting React. Out-of-band writes during startup can race
+    // its initial save of the loaded conversation, which is not this recovery test's subject.
+    android.content.Context context =
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
+    ChatImageStore store = new ChatImageStore(context);
+    android.graphics.Bitmap pixel =
+        android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888);
+    pixel.eraseColor(android.graphics.Color.BLUE);
+    java.io.ByteArrayOutputStream source = new java.io.ByteArrayOutputStream();
+    assertTrue(pixel.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, source));
+    pixel.recycle();
+    JSONObject image = store.importImage("lin", source.toByteArray()).getJSONObject("image");
+    JSONObject user =
+        new JSONObject()
+            .put("id", "missing-image-turn")
+            .put("role", "user")
+            .put("content", "保留文字")
+            .put("image", image);
+    JSONObject history =
+        new JSONObject()
+            .put(
+                "lin",
+                new JSONArray()
+                    .put(user)
+                    .put(
+                        new JSONObject()
+                            .put("id", "retained-reply")
+                            .put("role", "assistant")
+                            .put("content", "已有回复")))
+            .put(
+                "tao",
+                new JSONArray()
+                    .put(
+                        new JSONObject()
+                            .put("id", "unaffected-turn")
+                            .put("role", "user")
+                            .put("content", "另一个对话")));
+    new DataStore(context).saveHistory(history);
+    store.commitHistory(history);
+    java.io.File root = (java.io.File) field(store, "root");
+    assertTrue(
+        "Recovery fixture must remove an existing committed image",
+        new java.io.File(new java.io.File(root, "lin"), image.getString("id") + ".jpg").delete());
+    assertNull(store.preview("lin", image.getString("id")));
     try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-      NativeOriginStorageSmokeTest.awaitAndroidSettings(scenario);
-      QibanPlugin[] holder = new QibanPlugin[1];
-      scenario.onActivity(
-          activity ->
-              holder[0] = (QibanPlugin) activity.getBridge().getPlugin("Qiban").getInstance());
-      ChatImageStore store = (ChatImageStore) field(holder[0], "chatImages");
-      JSONObject picked =
-          pickerResult(holder[0], store, store.generation("lin"), Activity.RESULT_OK).result;
-      assertTrue("Recovery fixture import: " + picked.optString("error"), picked.getBoolean("ok"));
-      JSONObject image = picked.getJSONObject("value").getJSONObject("image");
-      JSONObject user =
-          new JSONObject()
-              .put("id", "missing-image-turn")
-              .put("role", "user")
-              .put("content", "保留文字")
-              .put("image", image);
-      JSONObject history =
-          new JSONObject()
-              .put(
-                  "lin",
-                  new JSONArray()
-                      .put(user)
-                      .put(
-                          new JSONObject()
-                              .put("id", "retained-reply")
-                              .put("role", "assistant")
-                              .put("content", "已有回复")))
-              .put(
-                  "tao",
-                  new JSONArray()
-                      .put(
-                          new JSONObject()
-                              .put("id", "unaffected-turn")
-                              .put("role", "user")
-                              .put("content", "另一个对话")));
-      nativeCall(scenario, "saveHistory", new JSONObject().put("history", history));
-      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
-      java.io.File root = (java.io.File) field(store, "root");
-      assertTrue(
-          new java.io.File(new java.io.File(root, "lin"), image.getString("id") + ".jpg").delete());
+      awaitRecoveredHistoryUI(scenario);
       scenario.recreate();
-      NativeOriginStorageSmokeTest.awaitAndroidSettings(scenario);
+      awaitRecoveredHistoryUI(scenario);
       nativeCall(scenario, "loadHistory", new JSONObject());
       JSONObject loaded = new JSONObject(settled(scenario));
       assertTrue("Missing bytes must not reject all history", loaded.getBoolean("ok"));
