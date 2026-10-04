@@ -1,6 +1,11 @@
 name: Android checks
 on:
   workflow_dispatch:
+    inputs:
+      emulator_smoke:
+        description: Run API35 emulator installation and native demo smoke
+        type: boolean
+        default: true
   push:
     branches: [feat/android]
   pull_request:
@@ -39,6 +44,7 @@ jobs:
             mv "$sdk_root/cmdline-tools/cmdline-tools" "$sdk_root/cmdline-tools/latest"
           fi
           echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
           sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
           # sdkmanager may close stdin after reading licenses; preserve its exit status.
           set +o pipefail
@@ -54,4 +60,31 @@ jobs:
         run: npm run android:debug
       - name: Record APK hashes
         run: sha256sum android/app/build/outputs/apk/{debug/app-debug.apk,release/app-release-unsigned.apk}
+      - name: Record public test certificate
+        run: '"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk'
+      - name: Check emulator acceleration
+        id: kvm
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.emulator_smoke)
+        run: |
+          if [ -c /dev/kvm ]; then
+            sudo chmod a+rw /dev/kvm
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "SKIP emulator smoke: this runner has no KVM device; no emulator acceptance claimed."
+          fi
+      - name: API35 installation and native demo smoke
+        if: steps.kvm.outputs.available == 'true'
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0 commit
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            node android/tools/emulator-smoke.mjs
+            cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest
       # No APK/key upload or publication. Debug identity is disposable and cannot establish release upgrade compatibility.
