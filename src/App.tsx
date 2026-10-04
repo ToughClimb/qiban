@@ -11,6 +11,7 @@ import type { Character } from "../shared/characters";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
+import { clearAppearance } from "./appearance";
 import {
   ChatError,
   sendMessage,
@@ -344,6 +345,7 @@ export function App() {
                     setDeletingData(false);
                     throw new Error(result.error);
                   }
+                  clearAppearance();
                   window.location.reload();
                 }}
               />

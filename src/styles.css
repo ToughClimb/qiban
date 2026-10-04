@@ -6,6 +6,12 @@
   --muted: #60695f;
   --line: #dedfd5;
   --accent: #415d4d;
+  --accent-hover: #2d4939;
+  --accent-soft: #e7ecdf;
+  --accent-selection: #e4e8dc;
+  --accent-navigation-hover: #e8eae0;
+  --accent-tint: #ecefe6;
+  --accent-border: #adbba8;
   --serif: "Noto Serif CJK SC", "Songti SC", "SimSun", Georgia, serif;
   color: var(--ink);
   background: var(--paper);
@@ -128,10 +134,10 @@ button {
   background: transparent;
 }
 .character-card:hover {
-  background: #e8eae0;
+  background: var(--accent-navigation-hover);
 }
 .character-card.selected {
-  background: #e4e8dc;
+  background: var(--accent-selection);
 }
 .avatar {
   display: grid;
@@ -232,8 +238,8 @@ button {
   font-size: 12px;
 }
 .quiet-button:hover:enabled {
-  background: #ecefe6;
-  border-color: #adbba8;
+  background: var(--accent-tint);
+  border-color: var(--accent-border);
 }
 .header-actions .quiet-button {
   padding: 8px 10px;
@@ -358,7 +364,7 @@ button {
   margin-right: 14px;
 }
 .user .bubble {
-  background: #e7ecdf;
+  background: var(--accent-soft);
   padding: 12px 18px;
   border-radius: 14px 2px 14px 14px;
 }
@@ -452,7 +458,7 @@ button {
   font-size: 12px;
 }
 .send-button:hover:enabled {
-  background: #2d4939;
+  background: var(--accent-hover);
 }
 .send-button:disabled {
   border-color: #e1e5d9;
@@ -768,6 +774,56 @@ button {
 .connection-dialog .local-data {
   margin-top: 0;
   padding-top: 17px;
+}
+
+.appearance-options {
+  border-top: 1px solid var(--line);
+}
+.appearance-options > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 18px 0;
+}
+.accent-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 16px;
+}
+.accent-swatch {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+}
+.accent-swatch::before {
+  content: "";
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--swatch);
+}
+.accent-swatch[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.settings-dialog label.custom-accent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 0 8px;
+  font-weight: 400;
+}
+.settings-dialog input[type="color"] {
+  width: 44px;
+  height: 44px;
+  padding: 4px;
+  cursor: pointer;
 }
 
 @media (min-width: 1400px) {

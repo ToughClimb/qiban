@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { desktopBridge } from "./api";
 import { DEFAULT_API_URL, type ConnectionStatus } from "../shared/desktop";
 import type { Mode } from "../shared/characters";
+import { AppearancePanel } from "./AppearancePanel";
 
 type Props = {
   onChanged: (mode: Mode) => void;
@@ -291,6 +292,7 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
             </div>
           </form>
         </details>
+        <AppearancePanel disabled={busy} />
         <details className="local-data">
           <summary>本地数据与隐私</summary>
           <p>
@@ -312,7 +314,7 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
               onClick={async () => {
                 if (
                   !window.confirm(
-                    "删除所有本地聊天和连接设置？无法恢复，请先备份。",
+                    "删除所有本地数据？无法恢复，请先备份。",
                   )
                 )
                   return;
