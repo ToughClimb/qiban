@@ -197,16 +197,22 @@ try {
 
   await command(join(installRoot, "Update.exe"), ["--uninstall", "--silent"]);
   installed = false;
-  assert.equal(
-    await exists(dataRoot),
-    false,
-    "Uninstall hook must remove synthetic user data",
-  );
-  assert.equal(
-    await exists(join(installRoot, `app-${upgradeVersion}`, "Qiban.exe")),
-    false,
-    "Uninstaller must remove installed application",
-  );
+  // Squirrel may finish before its app hook / executable cleanup has exited.
+  await expect
+    .poll(() => exists(dataRoot), {
+      timeout: 15_000,
+      message: "Uninstall hook must remove synthetic user data",
+    })
+    .toBe(false);
+  await expect
+    .poll(
+      () => exists(join(installRoot, `app-${upgradeVersion}`, "Qiban.exe")),
+      {
+        timeout: 15_000,
+        message: "Uninstaller must remove installed application",
+      },
+    )
+    .toBe(false);
   console.log(
     "PASS uninstall: installed executable, synthetic conversations, roles and encrypted connection data removed.",
   );
