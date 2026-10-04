@@ -1,3 +1,4 @@
+import { isChatImageAttachment } from "./image-chat.js";
 import { getCharacter, type CharacterId, type Message } from "./characters.js";
 export const STORAGE_KEY = "qiban.conversations.v1";
 export type Conversations = Partial<Record<CharacterId, Message[]>>;
@@ -20,9 +21,11 @@ export function readConversations(storage: {
           (message, index) =>
             message &&
             typeof message.id === "string" &&
+            Object.keys(message).every(key => ["id", "role", "content", "mode", "image"].includes(key)) &&
+            (!Object.hasOwn(message, "image") || (message.role === "user" && isChatImageAttachment(message.image))) &&
             message.role === (index % 2 === 0 ? "user" : "assistant") &&
             typeof message.content === "string" &&
-            message.content.length > 0 &&
+            (message.content.length > 0 || message.image !== undefined) &&
             message.content.length <= 8000 &&
             (message.mode === undefined ||
               (message.role === "assistant" &&
@@ -42,7 +45,9 @@ export function writeConversations(
   data: Conversations,
 ): boolean {
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const serialized = JSON.stringify(data);
+    if (JSON.stringify(readConversations({ getItem: () => serialized })) !== serialized) return false;
+    storage.setItem(STORAGE_KEY, serialized);
     return true;
   } catch {
     return false;
