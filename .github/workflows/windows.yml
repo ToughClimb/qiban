@@ -53,6 +53,12 @@ jobs:
           $env:QIBAN_PACKAGED_EXE = (Resolve-Path 'out/Qiban-win32-x64/Qiban.exe').Path
           npm run test:desktop
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Native packaged image chat
+        shell: pwsh
+        run: |
+          $env:QIBAN_PACKAGED_EXE = (Resolve-Path 'out/Qiban-win32-x64/Qiban.exe').Path
+          node tests/native-chat-images-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Installer hashes and sizes
         shell: pwsh
         run: |

@@ -1,6 +1,6 @@
 # Native chat-image integration
 
-Based on integration commit `fa851df3d2acb07f4e8ad46c462f5baa649664bb` and the existing shared image types/serializer. This change owns only desktop code and focused native tests; composer/UI and Android integration are separate.
+The Windows main process owns local image selection, normalization, storage and provider serialization. The React composer uses the fixed optional bridge; the localhost web adapter has no image-storage capability.
 
 ## Renderer contract
 
@@ -43,4 +43,4 @@ DISPLAY=:99 QIBAN_PACKAGED_EXE="$PWD/out/Qiban-linux-x64/Qiban" node tests/nativ
 
 The image smoke invokes the actual packaged preload/IPC/Chromium decoder. It covers PNG/JPEG/WebP, 1600-edge resizing, noisy-image downsampling below 1 MiB, preview rendering, selection/discard/cancel, owner isolation, image-only history/restart, scoped reset/card deletion, out-of-order dialogs, and late-dialog clear-all. Existing desktop smoke checks avatar regressions, sandbox/CSP, renderer Node isolation and untrusted-window IPC denial.
 
-All 68 tests and the build/typecheck checks passed. The Windows x64 cross-package build also passed. Linux packaged smoke establishes the Electron implementation path, not Windows installation, DPAPI or Squirrel uninstall acceptance. Windows validation and the composer integration remain with the parent/platform workers. No real provider images or configured secrets were accessed during implementation.
+Linux packaged smoke establishes the Electron implementation path, not Windows installation, DPAPI or Squirrel uninstall acceptance. Windows CI runs the same image smoke against the actual packaged executable, alongside composer tests and installer lifecycle checks. Provider serialization tests use synthetic keys and injected transports; no inference request is made by these checks.

@@ -29,6 +29,7 @@ const version = JSON.parse(await readFile("package.json", "utf8")).version;
 const [major, minor, patch] = version.split(".").map(Number);
 const upgradeVersion = `${major}.${minor}.${patch + 1}`;
 const cardId = "card-12345678-1234-1234-1234-123456789abc";
+const imageId = "image-12345678-1234-1234-1234-123456789abc";
 let application;
 let installed = false;
 
@@ -140,11 +141,22 @@ try {
       key: encrypted,
     }),
   );
+  const imageBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwSQv4DwAD5gH6hp8d8QAAAABJRU5ErkJggg==", "base64");
+  const historyFile = join(dataRoot, "history.json");
+  const imageHistory = JSON.parse(await readFile(historyFile, "utf8"));
+  imageHistory.conversations.lin[0].image = {
+    id: imageId, mimeType: "image/png", byteLength: imageBytes.length, width: 1, height: 1,
+  };
+  await mkdir(join(dataRoot, "chat-images", "lin"), { recursive: true });
+  await writeFile(join(dataRoot, "chat-images", "lin", `${imageId}.png`), imageBytes);
+  await writeFile(historyFile, JSON.stringify(imageHistory, null, 2));
   const files = [
     "history.json",
     "connection.json",
     join("cards", `${cardId}.json`),
     join("avatars", `${cardId}.png`),
+    join("chat-images", "lin", `${imageId}.png`),
   ];
   const snapshot = await Promise.all(
     files.map((file) => readFile(join(dataRoot, file))),
@@ -161,7 +173,7 @@ try {
   assert.equal(status.ok && status.value.mode, "demo");
   await close();
   console.log(
-    "PASS installer: per-user installation and relaunch preserve synthetic history, card ID and encrypted key; no model requests.",
+    "PASS installer: per-user installation and relaunch preserve synthetic history/image, card ID and encrypted key; no model requests.",
   );
 
   // Same frozen app payload, higher NuGet version: exercise an actual Squirrel upgrade.
@@ -217,6 +229,7 @@ try {
     "connection.json.tmp",
     "cards",
     "avatars",
+    "chat-images",
   ];
   await expect
     .poll(
@@ -260,7 +273,7 @@ try {
     );
   }
   console.log(
-    "PASS uninstall: installed executable, synthetic conversations, roles and encrypted connection data removed.",
+    "PASS uninstall: installed executable, synthetic conversations/images, roles and encrypted connection data removed.",
   );
   console.log(
     "LIMIT Chinese IME, ordinary-user installation and manual SmartScreen interaction remain unverified.",
