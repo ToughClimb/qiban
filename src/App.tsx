@@ -1,5 +1,5 @@
 import { Avatar } from "./Avatar";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import {
   characters,
   MAX_MESSAGE_LENGTH,
@@ -11,7 +11,7 @@ import type { Character } from "../shared/characters";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
-import { clearAppearance } from "./appearance";
+import { applyAccent, clearAppearance, storedAccent } from "./appearance";
 import {
   ChatError,
   sendMessage,
@@ -35,6 +35,7 @@ function loadSaved(): Conversations {
   }
 }
 export function App() {
+  useLayoutEffect(() => { applyAccent(storedAccent()); }, []);
   const desktop = desktopBridge();
   const [companions, setCompanions] =
     useState<readonly Character[]>(characters);

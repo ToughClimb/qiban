@@ -2,7 +2,7 @@
 
 This is a bounded follow-up to the accepted lean composition on `04bd44870ae8739fb9ae53961691f365c163a321`. Settings → 外观 contains four accent presets and a native color picker. Paper, body text, typography and layout remain unchanged. Light choices are darkened for readable controls; tinted selection and message surfaces are derived from the safe accent. Only six-digit hex colors and seven fixed CSS properties are accepted.
 
-The renderer stores versioned data under `qiban.appearance.v1` and applies it before React mounts. The preference survives reload and reopening a context with saved origin storage. Successful delete-all clears it before reload; a failed native wipe preserves it. Unavailable storage leaves the current selection usable and reports that it could not be saved.
+The renderer stores versioned data under `qiban.appearance.v1` and applies it in App's presentation lifecycle before the first paint, leaving the bootstrap entrypoint unchanged. The preference survives reload and reopening a context with saved origin storage. Successful delete-all clears it before reload; a failed native wipe preserves it. Unavailable storage leaves the current selection usable and reports that it could not be saved.
 
 Windows already uses the stable `qiban://app/index.html` origin. Android must retain a stable origin and enabled DOM storage. Any native wipe path that bypasses the renderer must also clear that origin's storage. No native bindings or platform files were changed in this follow-up.
 
