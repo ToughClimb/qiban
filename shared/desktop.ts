@@ -1,3 +1,4 @@
+import type { ChatImageDraft } from "./image-chat.js";
 import type { CardFields, CardList, CardPreview } from "./cards.js";
 import type { Conversations } from "./history.js";
 import type { ChatRequest, Mode } from "./characters.js";
@@ -18,7 +19,11 @@ export type ConnectionInput = {
   apiKey: string;
   remember: boolean;
 };
+export type ChatReply = { content: string; mode: Mode; omittedImageIds?: string[] };
 export type DesktopBridge = {
+  pickChatImage?(characterId: string): Promise<Result<ChatImageDraft | null>>;
+  chatImagePreview?(characterId: string, imageId: string): Promise<Result<string | null>>;
+  discardChatImage?(characterId: string, imageId: string): Promise<Result<void>>;
   importAvatar?(id: string): Promise<Result<string | null>>;
   deleteAvatar?(id: string): Promise<Result<void>>;
   cards(): Promise<Result<CardList>>;
@@ -43,6 +48,6 @@ export type DesktopBridge = {
   chat(
     request: ChatRequest,
     id: string,
-  ): Promise<Result<{ content: string; mode: Mode }>>;
+  ): Promise<Result<ChatReply>>;
   cancel(id: string): void;
 };

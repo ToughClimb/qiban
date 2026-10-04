@@ -1,3 +1,4 @@
+import type { ChatImageAttachment } from "./image-chat.js";
 export const characters = [
   {
     id: "lin",
@@ -65,10 +66,13 @@ export type Message = {
   role: "user" | "assistant";
   content: string;
   mode?: Mode;
+  image?: ChatImageAttachment;
 };
+// imageOmitted is a request-only marker; never replace the stored image reference.
+export type ChatMessage = Pick<Message, "role" | "content" | "image"> & { imageOmitted?: true };
 export type ChatRequest = {
   characterId: CharacterId;
-  messages: Pick<Message, "role" | "content">[];
+  messages: ChatMessage[];
 };
 export const MAX_MESSAGE_LENGTH = 2000;
 export const MAX_HISTORY = 40;
