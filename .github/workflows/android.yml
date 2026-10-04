@@ -20,9 +20,18 @@ on:
       ]
 permissions:
   contents: read
+concurrency:
+  group: android-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   android:
+    # These same-repository branches already receive the full push build/emulator check.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      !contains(fromJSON('["feat/android", "feat/qiban-mvp"]'), github.head_ref)
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -88,4 +97,28 @@ jobs:
           script: |
             cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest
             node android/tools/emulator-smoke.mjs
+      - name: Bounded native-test failure details
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reported = 0
+          for report in Path('android/app/build').glob('**/TEST-*.xml'):
+              try:
+                  root = ET.parse(report).getroot()
+              except ET.ParseError:
+                  continue
+              for case in root.iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      print('FAILED NATIVE TEST:', case.get('classname'), case.get('name'))
+                      print((failure.get('message') or '')[:500])
+                      print('\n'.join((failure.text or '').splitlines()[:20])[:3000])
+                      reported += 1
+                      if reported >= 10:
+                          raise SystemExit(0)
+          if not reported:
+              print('No native-test XML failure report was produced; inspect the failed build/setup step.')
+          PY
       # No APK/key upload or publication. Debug identity is disposable and cannot establish release upgrade compatibility.
