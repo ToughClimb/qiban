@@ -16,7 +16,7 @@ execFileSync(
   { stdio: "inherit" },
 );
 await build({
-  entryPoints: ["desktop/main.ts", "desktop/preload.ts", "desktop/store.ts"],
+  entryPoints: ["desktop/main.ts", "desktop/preload.ts"],
   outdir: "desktop-build",
   outExtension: { ".js": ".cjs" },
   bundle: true,

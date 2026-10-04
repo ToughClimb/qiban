@@ -1,10 +1,60 @@
 # Character-card JSON subset, version 1
 
-Qiban's first import pass is a small, independent JSON parser in
-`shared/character-card.ts`. It reads persona data without file access, network
-requests, image loading, code execution, prompt construction or storage. Desktop
-import UI and provider integration belong to the app builder; this module alone
-does not add an import button or make imported personas available to chat.
+The Windows desktop preview has a **管理角色** panel for local JSON import,
+original-format export, creation and editing. The native file picker reads only
+bounded regular UTF-8 JSON files (one leading UTF-8 BOM is accepted). It does not
+fetch remote cards or load card images. Before saving, inspect the preview and
+acknowledge unsupported fields. The main opening is used verbatim; alternate
+openings are retained but not selected. Macros remain literal text.
+
+To customize a built-in companion, use **复制并编辑**; built-ins stay intact.
+Editing a custom card changes six supported fields in its original V1/V2 source,
+retains unknown fields, and backs up the previous JSON. Export writes the original
+source shape, not Qiban's internal camelCase persona. Unsupported instructions,
+lorebooks and extensions remain in exported files but do not affect Qiban chat.
+Read another application's own import requirements before using those fields there.
+
+## Local files and AI-assisted editing
+
+Windows data lives at `%APPDATA%\Qiban`. In **管理角色**, **打开角色文件夹** opens
+`cards`. Each custom card has a stable opaque filename such as
+`card-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.json`; that filename is the character ID
+used by `history.json`. Keep it unchanged when editing. New copies need a new UUID
+filename. The app loads up to 20 custom cards. Invalid cards are reported and left
+untouched. **重新加载角色文件** applies external edits and cancels any ongoing reply.
+It retains chat history; reset that character separately when the new setting
+should start a fresh conversation.
+
+For an AI coding assistant: close Qiban first, copy `cards` and `history.json` to
+a dated backup, then edit only supported persona fields. Do not change connection
+settings, add tools/provider/credential fields, or edit the installed application.
+Validate source files from a repository checkout:
+
+```sh
+npm ci
+npm run check:card -- path/to/character.json --json
+```
+
+The validator's schema version is 1. Output contains format/status, field-path
+warnings and errors; it omits persona values and credentials. Exit code 0 means
+valid and within the provider context budget with a maximum Chinese user message;
+1 means invalid or too large; 2 means incorrect usage. Shorten overly long
+settings rather than deleting safety rules. No network requests occur.
+
+GUI edits keep the latest five backups per role in `cards/backups`. The files
+remain in original V1/V2 JSON; Qiban does not add a schema wrapper. `history.json`
+is `{ "schema_version": 1, "conversations": { "<stable-id>": [...] } }`; turns
+alternate user/assistant, keep stable message IDs, and assistant replies can carry
+`"mode": "demo"` or `"live"`. Upgrades keep the same data directory.
+
+Restore with the app closed: copy backed-up card files and `history.json` to the
+same data directory, retain filenames, then reopen. Never put backup JSON in the
+installed `resources/app.asar`. Do not include `connection.json` in shared backups:
+it may contain encrypted key material tied to the Windows account. Local chat
+records and cards are readable plaintext; only saved keys use safeStorage.
+Deleting a custom role also deletes its conversation. **删除所有本地数据** removes
+roles, role backups, histories and saved connection settings. Export or back up
+before deleting. Uninstall cleanup still needs installer acceptance testing.
 
 ## Supported import formats
 

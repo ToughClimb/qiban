@@ -4,12 +4,15 @@ import {
   ipcMain,
   protocol,
   safeStorage,
+  dialog,
+  shell,
   type IpcMainInvokeEvent,
 } from "electron";
 import squirrelStartup from "electron-squirrel-startup";
 import { readFile, rm } from "node:fs/promises";
-import { rmSync } from "node:fs";
+import { rmSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join, sep, extname } from "node:path";
+import { CardStore, sourceText } from "./cards.js";
 import { ConnectionStore } from "./store.js";
 import { HistoryStore } from "./history.js";
 import { DesktopService } from "./service.js";
@@ -104,7 +107,9 @@ if (locked)
         decryptString: (value) => safeStorage.decryptString(value),
       });
       const history = new HistoryStore(directory);
-      service = new DesktopService(store);
+      const cards = new CardStore(directory);
+      cards.list();
+      service = new DesktopService(store, undefined, cards);
       function trusted(event: IpcMainInvokeEvent) {
         return (
           window &&
@@ -133,6 +138,59 @@ if (locked)
           }
         });
       }
+      handle("cards:list", () => {
+        service!.cancelAll();
+        return cards.list();
+      });
+      handle("cards:fields", (id) => cards.fields(id));
+      handle("cards:preview", (id, fields) => cards.editPreview(id, fields));
+      handle("cards:save", (token, acknowledged) => {
+        service!.cancelAll();
+        return cards.commit(token, acknowledged);
+      });
+      handle("cards:cancel", () => cards.cancel());
+      handle("cards:import", async () => {
+        cards.cancel();
+        const result = await dialog.showOpenDialog(window!, {
+          title: "导入 JSON 角色",
+          filters: [{ name: "JSON 角色", extensions: ["json"] }],
+          properties: ["openFile"],
+        });
+        if (result.canceled) return null;
+        const file = result.filePaths[0];
+        const stat = lstatSync(file);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 * 1024)
+          throw new ConnectionError(
+            "card",
+            "请选择不超过 128 KiB 的普通 JSON 文件。",
+          );
+        return cards.preview(sourceText(readFileSync(file)));
+      });
+      handle("cards:export", async (id) => {
+        const source = cards.original(id);
+        const result = await dialog.showSaveDialog(window!, {
+          title: "导出原始角色 JSON",
+          defaultPath: `${id}.json`,
+          filters: [{ name: "JSON 角色", extensions: ["json"] }],
+        });
+        if (!result.canceled && result.filePath)
+          writeFileSync(result.filePath, source, { mode: 0o600 });
+      });
+      handle("cards:delete", (id) => {
+        const saved = history.load();
+        service!.cancelAll();
+        cards.delete(id);
+        delete saved[id];
+        history.save(saved);
+      });
+      handle("cards:open", async () => {
+        const error = await shell.openPath(cards.directory);
+        if (error)
+          throw new ConnectionError(
+            "card",
+            "角色文件夹无法打开，请在数据位置手动打开 cards 文件夹。",
+          );
+      });
       handle("connection:status", () => service!.status());
       handle("connection:connect", (input) => service!.connect(input));
       handle("connection:model", (model) => service!.selectModel(model));
@@ -152,6 +210,7 @@ if (locked)
       handle("data:delete", async () => {
         service!.deleteData();
         history.clear();
+        cards.clear();
         await window!.webContents.session.clearStorageData();
         await window!.webContents.session.clearCache();
       });

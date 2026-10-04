@@ -1,3 +1,4 @@
+import type { CardFields, CardList, CardPreview } from "./cards.js";
 import type { Conversations } from "./history.js";
 import type { ChatRequest, Mode } from "./characters.js";
 export const DEFAULT_API_URL = "https://api.deepseek.com";
@@ -18,6 +19,15 @@ export type ConnectionInput = {
   remember: boolean;
 };
 export type DesktopBridge = {
+  cards(): Promise<Result<CardList>>;
+  importCard(): Promise<Result<CardPreview | null>>;
+  editFields(id: string): Promise<Result<CardFields>>;
+  previewCard(id: string, fields: CardFields): Promise<Result<CardPreview>>;
+  saveCard(token: string, acknowledged: boolean): Promise<Result<string>>;
+  cancelCard(): Promise<Result<void>>;
+  exportCard(id: string): Promise<Result<void>>;
+  deleteCard(id: string): Promise<Result<void>>;
+  openCards(): Promise<Result<void>>;
   loadHistory(): Promise<Result<Conversations>>;
   saveHistory(value: Conversations): Promise<Result<void>>;
   dataPath(): Promise<Result<string>>;

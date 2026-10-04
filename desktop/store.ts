@@ -1,5 +1,6 @@
 import {
   mkdirSync,
+  existsSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -38,6 +39,7 @@ export class ConnectionStore {
       enabled: false,
       remembered: false,
     };
+    if (!existsSync(this.file)) return empty;
     try {
       const buffer = readFileSync(this.file);
       if (buffer.length > 32 * 1024) return empty;
@@ -46,13 +48,18 @@ export class ConnectionStore {
         return { ...empty, warning: "连接设置版本无法读取，请重新设置。" };
       const baseUrl = normalizeEndpoint(record.baseUrl).href.replace(/\/$/, "");
       const model =
-        typeof record.model === "string" && record.model.length <= 128
+        typeof record.model === "string" &&
+        record.model.length <= 128 &&
+        !/[\u0000-\u001f\u007f]/.test(record.model)
           ? record.model
           : "";
       const models = Array.isArray(record.models)
         ? record.models
             .filter(
-              (item: unknown) => typeof item === "string" && item.length <= 128,
+              (item: unknown) =>
+                typeof item === "string" &&
+                item.length <= 128 &&
+                !/[\u0000-\u001f\u007f]/.test(item),
             )
             .slice(0, 64)
         : [];
@@ -63,6 +70,8 @@ export class ConnectionStore {
           key = this.encryption.decryptString(
             Buffer.from(record.key, "base64"),
           );
+          if (!key || key.length > 4096 || /[\s\u0000-\u001f\u007f]/.test(key))
+            throw new Error();
         } catch {
           return {
             ...empty,
@@ -82,7 +91,7 @@ export class ConnectionStore {
         key,
       };
     } catch {
-      return empty;
+      return { ...empty, warning: "连接设置无法读取，请重新设置。" };
     }
   }
   save(

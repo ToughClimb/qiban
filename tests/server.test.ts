@@ -216,13 +216,14 @@ test("DeepSeek adapter uses fixed endpoint, proxy dispatcher, token cap, and fin
     assert.deepEqual(body.thinking, { type: "disabled" });
     assert.equal(body.stream, false);
     assert.equal(body.messages[0].role, "system");
-    assert.match(body.messages[0].content, /林野/);
+    assert.match(body.messages[1].content, /林野/);
     assert.ok(
-      body.messages[0].content.includes(
+      body.messages[1].content.includes(
         getCharacter(request.characterId)!.greeting,
       ),
     );
-    assert.equal(body.messages[1].content, request.messages[0].content);
+    assert.equal(body.messages[2].content, getCharacter(request.characterId)!.greeting);
+    assert.equal(body.messages[3].content, request.messages[0].content);
     return Response.json({
       choices: [
         {

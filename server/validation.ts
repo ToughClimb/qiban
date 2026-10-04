@@ -5,7 +5,10 @@ import {
   type ChatRequest,
 } from "../shared/characters.js";
 import { fitsChatBudget } from "../shared/chat.js";
-export function parseChat(value: unknown): ChatRequest | null {
+export function parseChat(
+  value: unknown,
+  known: (id: string) => boolean = (id) => Boolean(getCharacter(id)),
+): ChatRequest | null {
   if (!value || typeof value !== "object") return null;
   const body = value as Record<string, unknown>;
   if (
@@ -13,7 +16,7 @@ export function parseChat(value: unknown): ChatRequest | null {
       (key) => !["characterId", "messages"].includes(key),
     ) ||
     typeof body.characterId !== "string" ||
-    !getCharacter(body.characterId)
+    !known(body.characterId)
   )
     return null;
   if (

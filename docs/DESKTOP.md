@@ -29,4 +29,4 @@ HTTPS public endpoints only. Local/private/reserved DNS answers, embedded creden
 
 `npm test` covers storage failures, host changes, DNS restrictions, cancellation, history, and real local HTTPS redirect handling using synthetic credentials. `npm run test:desktop` runs Electron onboarding/chat/restart and renderer security checks; on Linux it needs a display and uses the test runner's no-sandbox launch flag. Production windows retain sandbox, context isolation and web security. Passing on Linux is not Windows installer acceptance.
 
-JSON character-card parsing is present with V1/V2 examples. The native picker/editor integration is still being implemented; see `CHARACTER_CARDS.md` for supported fields and limits.
+Local V1/V2 JSON character import, preview, original-source export, creation, editing and backups are available under 管理角色. See `CHARACTER_CARDS.md` for supported fields, limits and closed-app maintenance.

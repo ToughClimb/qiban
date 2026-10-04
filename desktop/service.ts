@@ -1,3 +1,4 @@
+import type { CardStore } from "./cards.js";
 import { createProvider } from "../server/provider.js";
 import { modelRequest, finalText, LIVE_MODEL } from "../server/model.js";
 import { parseChat } from "../server/validation.js";
@@ -27,6 +28,7 @@ export class DesktopService {
   constructor(
     private store: ConnectionStore,
     private transport: JsonTransport = requestJson,
+    private cards?: CardStore,
   ) {
     this.connection = store.load();
   }
@@ -176,7 +178,10 @@ export class DesktopService {
     for (const controller of this.active.values()) controller.abort();
   }
   async chat(value: ChatRequest, id: string) {
-    const request = parseChat(value);
+    const request = parseChat(
+      value,
+      this.cards ? (id) => this.cards!.has(id) : undefined,
+    );
     if (!request || typeof id !== "string" || !/^[a-z0-9-]{1,64}$/i.test(id))
       throw new ConnectionError(
         "input",
@@ -195,15 +200,25 @@ export class DesktopService {
     const { key, baseUrl, model } = this.connection;
     try {
       const endpoint = normalizeEndpoint(baseUrl);
-      const data = await this.transport(
-        new URL("chat/completions", endpoint),
-        key!,
-        modelRequest(
+      let body;
+      try {
+        body = modelRequest(
           request,
           model,
           endpoint.hostname === "api.deepseek.com" ||
             /^deepseek[-/]/i.test(model),
-        ),
+          this.cards?.persona(request.characterId),
+        );
+      } catch {
+        throw new ConnectionError(
+          "context",
+          "角色设定与消息过长，请缩短角色设定或编辑这条消息后重试。",
+        );
+      }
+      const data = await this.transport(
+        new URL("chat/completions", endpoint),
+        key!,
+        body,
         controller.signal,
       );
       if (controller.signal.aborted)

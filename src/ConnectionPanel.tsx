@@ -115,11 +115,15 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
       <dialog
         className="settings-dialog"
         ref={dialog}
-        onCancel={() => setKey("")}
+        onCancel={(event) => {
+          if (busy) event.preventDefault();
+          else setKey("");
+        }}
       >
         <button
           className="dialog-close"
           aria-label="关闭连接设置"
+          disabled={busy}
           onClick={close}
         >
           ×

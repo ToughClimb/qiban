@@ -6,6 +6,8 @@ import {
   type CharacterId,
   type Message,
 } from "../shared/characters";
+import { CardPanel } from "./CardPanel";
+import type { Character } from "../shared/characters";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
@@ -33,6 +35,9 @@ function loadSaved(): Conversations {
 }
 export function App() {
   const desktop = desktopBridge();
+  const [companions, setCompanions] =
+    useState<readonly Character[]>(characters);
+  const [cardIssues, setCardIssues] = useState<string[]>([]);
   const [storageReady, setStorageReady] = useState(!desktop);
   const [deletingData, setDeletingData] = useState(false);
   const [selected, setSelected] = useState<CharacterId>("lin");
@@ -53,7 +58,8 @@ export function App() {
   const request = useRef<AbortController | null>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const character = characters.find((item) => item.id === selected)!;
+  const character =
+    companions.find((item) => item.id === selected) ?? characters[0];
   const messages = conversations[selected] ?? [];
   const draft = drafts[selected] ?? "";
   const unanswered = messages.at(-1)?.role === "user";
@@ -74,6 +80,19 @@ export function App() {
   useEffect(() => {
     if (!desktop) return;
     let cancelled = false;
+    desktop
+      .cards()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setCompanions(result.value.characters);
+          setCardIssues(result.value.issues);
+        } else setCardIssues([result.error]);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setCardIssues(["角色文件无法读取，请在角色管理中重新加载。"]);
+      });
     desktop
       .loadHistory()
       .then((result) => {
@@ -223,7 +242,11 @@ export function App() {
   }
   return (
     <div className="app-shell">
-      <CharacterPicker selected={selected} onChoose={choose} />
+      <CharacterPicker
+        companions={companions}
+        selected={selected}
+        onChoose={choose}
+      />
       <main className="chat-panel">
         <header className="chat-header">
           <div className="chat-identity">
@@ -236,6 +259,26 @@ export function App() {
             </div>
           </div>
           <div className="header-actions">
+            {desktop && (
+              <CardPanel
+                character={character}
+                onChanged={(list, id) => {
+                  cancelRequest();
+                  setCompanions(list.characters);
+                  setCardIssues(list.issues);
+                  if (id) setSelected(id);
+                  else if (
+                    !list.characters.some((item) => item.id === selected)
+                  )
+                    setSelected("lin");
+                }}
+                onDelete={(id) => {
+                  cancelRequest();
+                  setConversations((current) => resetConversation(current, id));
+                  setDrafts((current) => ({ ...current, [id]: "" }));
+                }}
+              />
+            )}
             {desktop && (
               <ConnectionPanel
                 onChanged={(value) => {
@@ -287,6 +330,14 @@ export function App() {
             <span>正在连接栖伴…</span>
           )}
         </div>
+        {cardIssues.length > 0 && (
+          <details className="card-issues">
+            <summary>有角色文件需要检查</summary>
+            {cardIssues.map((issue) => (
+              <p key={issue}>{issue}</p>
+            ))}
+          </details>
+        )}
         {locked && (
           <form
             className="access-form"
@@ -405,7 +456,9 @@ export function App() {
             role={storageError ? "status" : undefined}
           >
             {storageError
-              ? "浏览器无法保存记录；关闭页面后，本次聊天可能丢失。"
+              ? desktop
+                ? "本地记录无法保存，请检查磁盘空间并备份数据。"
+                : "浏览器无法保存记录；关闭页面后，本次聊天可能丢失。"
               : desktop
                 ? mode === "live"
                   ? "记录仅保存在本机；近期聊天会发送至你设置的 AI 服务。"

@@ -44,8 +44,19 @@ export const characters = [
     starters: ["想安静待一会儿", "跟我讲个小故事"],
   },
 ] as const;
-export type Character = (typeof characters)[number];
-export type CharacterId = (typeof characters)[number]["id"];
+export type BuiltinId = (typeof characters)[number]["id"];
+export type CharacterId = string;
+export type Character = {
+  id: string;
+  name: string;
+  kind: string;
+  emoji: string;
+  color: string;
+  role: string;
+  description: string;
+  greeting: string;
+  starters: readonly string[];
+};
 export type Mode = "demo" | "live";
 export type Message = {
   id: string;

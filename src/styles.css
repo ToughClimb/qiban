@@ -904,3 +904,56 @@ textarea:focus-visible {
     font-size: 25px;
   }
 }
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px 0;
+}
+.card-actions .field-note {
+  flex-basis: 100%;
+}
+.card-dialog textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  line-height: 1.6;
+  background: #fff;
+  color: var(--ink);
+}
+.card-dialog .connection-form > div {
+  display: grid;
+  gap: 8px;
+}
+.card-preview {
+  margin-top: 24px;
+}
+.card-preview p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+.card-preview > div {
+  margin-bottom: 20px;
+}
+.card-warning {
+  padding: 16px;
+  background: #fff5d9;
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.card-warning ul {
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.card-issues {
+  padding: 12px 24px;
+  background: #fff5d9;
+  font-size: 14px;
+}
+.header-actions {
+  flex-wrap: wrap;
+}

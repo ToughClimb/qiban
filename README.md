@@ -2,7 +2,7 @@
 
 A small Chinese roleplay chat app with four original virtual companions: 林野 (walking buddy), 陶陶 (creative friend), 豆包 (dog), and 月饼 (cat). Characters are explicitly virtual. The default demo uses preset examples and labels them as such.
 
-A Windows desktop preview with local connection setup is available from source; see [desktop instructions](docs/DESKTOP.md). Installer and card-editor acceptance are still in progress.
+A Windows desktop preview with local connection setup is available from source; see [desktop instructions](docs/DESKTOP.md). Local JSON card editing is included. Installer acceptance is still in progress.
 
 ## Run
 

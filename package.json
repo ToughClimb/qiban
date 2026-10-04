@@ -18,7 +18,8 @@
     "desktop:start": "npm run desktop:build && electron .",
     "desktop:package": "npm run desktop:build && electron-forge package --platform=win32 --arch=x64",
     "desktop:make": "npm run desktop:build && electron-forge make --platform=win32 --arch=x64",
-    "test:desktop": "node tests/desktop-smoke.mjs"
+    "test:desktop": "node tests/desktop-smoke.mjs",
+    "check:card": "node --import tsx scripts/check-card.ts"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

@@ -1,16 +1,22 @@
 import { Avatar } from "./Avatar";
-import { characters, type CharacterId } from "../shared/characters";
+import {
+  characters,
+  type Character,
+  type CharacterId,
+} from "../shared/characters";
 
 export function CharacterPicker({
   selected,
   onChoose,
+  companions = characters,
 }: {
+  companions?: readonly Character[];
   selected: CharacterId;
   onChoose: (id: CharacterId) => void;
 }) {
   return (
     <aside className="companions">
-      <a className="brand" href="/" aria-label="栖伴首页">
+      <a className="brand" href="./index.html" aria-label="栖伴首页">
         <span className="brand-mark">栖</span>
         <span>
           栖伴<small>QIBAN</small>
@@ -22,7 +28,7 @@ export function CharacterPicker({
         <p>选一位伙伴，慢慢说。</p>
       </div>
       <nav className="character-list" aria-label="选择伙伴">
-        {characters.map((item) => (
+        {companions.map((item) => (
           <button
             key={item.id}
             type="button"

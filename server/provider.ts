@@ -35,7 +35,7 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
 function demoReply({ characterId, messages }: ChatRequest): string {
   const last = messages.at(-1)!.content;
   const tired = /累|难过|烦|放松|安静/.test(last);
-  const replies = {
+  const replies: Record<string, string> = {
     lin: tired
       ? "那就先歇一歇。我会想象我们坐在河边，听一会儿风。你想说说发生了什么，还是聊点轻松的？"
       : "散步时我发现，熟悉的小路也会冒出新鲜的细节。你今天有没有留意到一件小事？",
@@ -49,7 +49,10 @@ function demoReply({ characterId, messages }: ChatRequest): string {
       ? "喵，那就先靠着软垫坐一会儿。不说话也可以。我在窗边看一片慢悠悠的云。"
       : "今天一只麻雀来窗外串门，我假装没看见它，尾巴却暴露了。喵，你那边有什么小趣事？",
   };
-  return replies[characterId];
+  return (
+    replies[characterId] ??
+    "这里是演示聊天的预设示例。连接 AI 服务后，角色会根据你写的设定来回应。今天想聊些什么？"
+  );
 }
 
 export type ProviderFetch = (
