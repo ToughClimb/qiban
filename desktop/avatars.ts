@@ -10,7 +10,7 @@ export function avatarId(value: unknown): string {
     throw new ConnectionError("avatar", "角色不存在，请重新加载。");
   return value;
 }
-function readRegular(file: string, limit: number): Buffer {
+export function readRegular(file: string, limit: number): Buffer {
   const before = lstatSync(file);
   if (!before.isFile() || before.isSymbolicLink() || before.size > limit) imageError();
   const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

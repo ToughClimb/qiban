@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/desktop.js";
 const bridge: DesktopBridge = {
+  pickChatImage: (characterId) => ipcRenderer.invoke("chat-images:pick", characterId),
+  chatImagePreview: (characterId, imageId) => ipcRenderer.invoke("chat-images:preview", characterId, imageId),
+  discardChatImage: (characterId, imageId) => ipcRenderer.invoke("chat-images:discard", characterId, imageId),
   importAvatar: (id) => ipcRenderer.invoke("avatars:import", id),
   deleteAvatar: (id) => ipcRenderer.invoke("avatars:delete", id),
   cards: () => ipcRenderer.invoke("cards:list"),
