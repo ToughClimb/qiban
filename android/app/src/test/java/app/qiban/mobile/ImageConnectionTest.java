@@ -311,4 +311,44 @@ public class ImageConnectionTest {
     } catch (IllegalArgumentException expected) {
     }
   }
+
+  @Test
+  public void tailEditKeepsOnlyRequestAlreadyUsingSavedInput() throws Exception {
+    JSONObject old = request(new JSONArray().put(user("look", image(1, 3))));
+    JSONObject edited = request(new JSONArray().put(user("edited text", null)));
+    JSONArray saved =
+        new JSONArray()
+            .put(
+                ConnectionService.object(
+                    "id", "persisted-id", "role", "user", "content", "edited text"));
+    assertFalse(ConnectionService.matchesSavedBasis(old, "lin", saved));
+    assertTrue(ConnectionService.matchesSavedBasis(edited, "lin", saved));
+    JSONObject replacement = request(new JSONArray().put(user("look", image(2, 3))));
+    saved = new JSONArray().put(user("look", image(2, 3)));
+    assertFalse(ConnectionService.matchesSavedBasis(old, "lin", saved));
+    assertTrue(ConnectionService.matchesSavedBasis(replacement, "lin", saved));
+    assertFalse(ConnectionService.matchesSavedBasis(replacement, "tao", saved));
+    assertFalse(ConnectionService.matchesSavedBasis(null, "lin", saved));
+  }
+
+  @Test
+  public void basisMatchesLongestSavedSuffixAndOmittedStoredImages() throws Exception {
+    JSONArray saved = new JSONArray();
+    for (int i = 0; i < 99; i++) {
+      saved.put(user("older" + i, null));
+      saved.put(
+          ConnectionService.object(
+              "id", "assistant-" + i, "role", "assistant", "content", "reply", "mode", "demo"));
+    }
+    saved.put(user("latest", image(1, 3)));
+    JSONObject omitted = user("latest", null);
+    omitted.put("imageOmitted", true);
+    JSONObject basis = request(new JSONArray().put(omitted));
+    assertTrue(ConnectionService.matchesSavedBasis(basis, "lin", saved));
+    saved.remove(0);
+    saved.remove(0);
+    assertTrue(ConnectionService.matchesSavedBasis(basis, "lin", saved));
+    saved.getJSONObject(saved.length() - 1).put("content", "changed");
+    assertFalse(ConnectionService.matchesSavedBasis(basis, "lin", saved));
+  }
 }

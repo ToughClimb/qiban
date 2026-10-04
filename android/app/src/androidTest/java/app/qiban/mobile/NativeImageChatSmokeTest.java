@@ -99,6 +99,16 @@ public final class NativeImageChatSmokeTest {
           activity ->
               holder[0] = (QibanPlugin) activity.getBridge().getPlugin("Qiban").getInstance());
       QibanPlugin plugin = holder[0];
+      scenario.onActivity(
+          activity -> {
+            try (java.io.InputStream pixel =
+                activity.getContentResolver().openInputStream(SyntheticImageProvider.PIXEL)) {
+              assertNotNull("Test-only provider must be visible to the target debug app", pixel);
+              assertEquals("Synthetic PNG signature", 137, pixel.read());
+            } catch (Exception error) {
+              throw new AssertionError("Synthetic provider read failed", error);
+            }
+          });
       ChatImageStore store = (ChatImageStore) field(plugin, "chatImages");
       ConnectionService connection = (ConnectionService) field(plugin, "connection");
       assertEquals("demo", connection.status().getString("mode"));
@@ -108,7 +118,9 @@ public final class NativeImageChatSmokeTest {
               .isNull("value"));
       RecordingCall selected =
           pickerResult(plugin, store, store.generation("lin"), Activity.RESULT_OK);
-      assertTrue(selected.result.getBoolean("ok"));
+      assertTrue(
+          "Synthetic picker selection: " + selected.result.optString("error"),
+          selected.result.getBoolean("ok"));
       JSONObject draft = selected.result.getJSONObject("value"),
           image = draft.getJSONObject("image");
       String imageId = image.getString("id"), preview = draft.getString("previewUrl");
@@ -167,6 +179,56 @@ public final class NativeImageChatSmokeTest {
       assertFalse(prepared.body.toString().contains(imageId));
       assertEquals(0, prepared.omittedImageIds.length());
       assertEquals("demo", connection.status().getString("mode"));
+      // Exercise the actual save bridge while a synthetic reply token is pending.
+      JSONArray full = new JSONArray();
+      for (int i = 0; i < 200; i++)
+        full.put(
+            new JSONObject()
+                .put("id", "rolling-" + i)
+                .put("role", i % 2 == 0 ? "user" : "assistant")
+                .put("content", "合成记录"));
+      nativeCall(
+          scenario,
+          "saveHistory",
+          new JSONObject().put("history", new JSONObject().put("lin", full)));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      @SuppressWarnings("unchecked")
+      java.util.Map<String, NativeHttp.Cancellation> active =
+          (java.util.Map<String, NativeHttp.Cancellation>) field(connection, "active");
+      NativeHttp.Cancellation syntheticReply = new NativeHttp.Cancellation();
+      synchronized (connection) {
+        active.put("synthetic-rollover-reply", syntheticReply);
+      }
+      JSONArray rolled = new JSONArray();
+      for (int i = 2; i < full.length(); i++) rolled.put(full.getJSONObject(i));
+      rolled.put(
+          new JSONObject()
+              .put("id", "rolling-image-user")
+              .put("role", "user")
+              .put("content", "")
+              .put("image", image));
+      long beforeRollover = store.generation("lin");
+      nativeCall(
+          scenario,
+          "saveHistory",
+          new JSONObject().put("history", new JSONObject().put("lin", rolled)));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertFalse(
+          "Oldest-turn pruning must not cancel the pending reply", syntheticReply.cancelled);
+      assertEquals(beforeRollover, store.generation("lin"));
+      assertNotNull(store.preview("lin", imageId));
+      rolled.put(
+          new JSONObject()
+              .put("id", "rolling-image-reply")
+              .put("role", "assistant")
+              .put("content", "合成图片回复")
+              .put("mode", "live"));
+      nativeCall(
+          scenario,
+          "saveHistory",
+          new JSONObject().put("history", new JSONObject().put("lin", rolled)));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertFalse(syntheticReply.cancelled);
       // A newly selected draft resolves before the asynchronous history save effect.
       JSONObject wrongOwner = new JSONObject(request.toString()).put("characterId", "tao");
       assertThrows(
@@ -188,6 +250,11 @@ public final class NativeImageChatSmokeTest {
       JSONObject history = new JSONObject().put("lin", new JSONArray().put(turn));
       nativeCall(scenario, "saveHistory", new JSONObject().put("history", history));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertTrue("Explicit tail replacement cancels pending work", syntheticReply.cancelled);
+      assertTrue(store.generation("lin") > beforeRollover);
+      synchronized (connection) {
+        active.remove("synthetic-rollover-reply");
+      }
       nativeCall(scenario, "loadHistory", new JSONObject());
       JSONObject loaded = new JSONObject(settled(scenario));
       assertTrue(loaded.getBoolean("ok"));
@@ -279,14 +346,70 @@ public final class NativeImageChatSmokeTest {
       JSONObject editedHistory = new JSONObject().put("lin", new JSONArray().put(editedTurn));
       nativeCall(scenario, "saveHistory", new JSONObject().put("history", editedHistory));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      ConnectionService restartedConnection =
+          (ConnectionService) field(restartedPlugin, "connection");
+      @SuppressWarnings("unchecked")
+      java.util.Map<String, NativeHttp.Cancellation> editingActive =
+          (java.util.Map<String, NativeHttp.Cancellation>) field(restartedConnection, "active");
+      @SuppressWarnings("unchecked")
+      java.util.Map<String, JSONObject> editingBasis =
+          (java.util.Map<String, JSONObject>) field(restartedConnection, "activeBasis");
+      NativeHttp.Cancellation editingReply = new NativeHttp.Cancellation();
+      JSONObject textBasis =
+          new JSONObject()
+              .put("characterId", "lin")
+              .put(
+                  "messages",
+                  new JSONArray()
+                      .put(new JSONObject().put("role", "user").put("content", "替换后的文字")));
+      synchronized (restartedConnection) {
+        editingActive.put("synthetic-edited-reply", editingReply);
+        editingBasis.put("synthetic-edited-reply", textBasis);
+      }
       editedTurn.remove("image");
+      editedTurn.put("content", "替换后的文字");
       nativeCall(scenario, "saveHistory", new JSONObject().put("history", editedHistory));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertFalse(
+          "Saving an edit already used by a new reply must not cancel it", editingReply.cancelled);
       assertNull(restartedStore.preview("lin", editedImage.getString("id")));
       assertThrows(
           IllegalArgumentException.class, () -> restartedStore.resolve("lin", editedImage));
+      RecordingCall replacement =
+          pickerResult(
+              restartedPlugin,
+              restartedStore,
+              restartedStore.generation("lin"),
+              Activity.RESULT_OK);
+      JSONObject replacementImage =
+          replacement.result.getJSONObject("value").getJSONObject("image");
+      JSONObject imageBasis =
+          new JSONObject()
+              .put("characterId", "lin")
+              .put(
+                  "messages",
+                  new JSONArray()
+                      .put(
+                          new JSONObject()
+                              .put("role", "user")
+                              .put("content", "")
+                              .put("image", replacementImage)));
+      synchronized (restartedConnection) {
+        editingBasis.put("synthetic-edited-reply", imageBasis);
+      }
+      editedTurn.put("content", "").put("image", replacementImage);
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", editedHistory));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertFalse("Staged replacement image matches the new reply basis", editingReply.cancelled);
+      assertNotNull(restartedStore.preview("lin", replacementImage.getString("id")));
       nativeCall(scenario, "saveHistory", new JSONObject().put("history", new JSONObject()));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertTrue("Explicit reset still cancels a matching new request", editingReply.cancelled);
+      assertNull(restartedStore.preview("lin", replacementImage.getString("id")));
+      synchronized (restartedConnection) {
+        editingActive.remove("synthetic-edited-reply");
+        editingBasis.remove("synthetic-edited-reply");
+      }
     }
   }
 }

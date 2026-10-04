@@ -90,6 +90,46 @@ public final class ChatImageStore {
     return generations.get(owner);
   }
 
+  /** Oldest-turn pruning preserves the previous tail; only removing or editing it resets work. */
+  public static boolean tailRemovedOrChanged(JSONArray previous, JSONArray next) {
+    if (previous == null || previous.length() == 0) return false;
+    JSONObject tail = previous.optJSONObject(previous.length() - 1);
+    if (tail == null || !(tail.opt("id") instanceof String) || next == null) return true;
+    for (int i = 0; i < next.length(); i++) {
+      JSONObject candidate = next.optJSONObject(i);
+      if (candidate != null
+          && tail.opt("id").equals(candidate.opt("id"))
+          && sameTurn(tail, candidate)) return false;
+    }
+    return true;
+  }
+
+  private static boolean sameTurn(JSONObject left, JSONObject right) {
+    for (String key : Arrays.asList("id", "role", "content", "mode", "image")) {
+      if (left.has(key) != right.has(key)) return false;
+      if (!left.has(key)) continue;
+      if (key.equals("image")) {
+        JSONObject a = left.optJSONObject(key), b = right.optJSONObject(key);
+        if (a == null || b == null) return false;
+        for (String field : Arrays.asList("id", "mimeType", "byteLength", "width", "height")) {
+          if (a.has(field) != b.has(field)) return false;
+          Object av = a.opt(field), bv = b.opt(field);
+          if (av instanceof Number && bv instanceof Number) {
+            if (Double.compare(((Number) av).doubleValue(), ((Number) bv).doubleValue()) != 0)
+              return false;
+          } else if (!Objects.equals(av, bv)) return false;
+        }
+      } else if (!Objects.equals(left.opt(key), right.opt(key))) return false;
+    }
+    return true;
+  }
+
+  /** Invalidates outstanding picker callbacks without taking ownership of draft deletion. */
+  public synchronized void invalidatePending(String owner) {
+    checkOwner(owner);
+    generations.put(owner, ++clock);
+  }
+
   static void validateAttachment(JSONObject image) {
     if (image == null || image.length() != 5) throw error("聊天图片引用格式无效");
     Iterator<String> keys = image.keys();

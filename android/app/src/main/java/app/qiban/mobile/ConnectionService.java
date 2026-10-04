@@ -16,6 +16,7 @@ public final class ConnectionService {
   private final ImageResolver images;
   private final NativeHttp http = new NativeHttp();
   private final Map<String, NativeHttp.Cancellation> active = new HashMap<>();
+  private final Map<String, JSONObject> activeBasis = new HashMap<>();
   private NativeHttp.Cancellation setup;
 
   public ConnectionService(Context context) {
@@ -230,6 +231,49 @@ public final class ConnectionService {
   public synchronized void cancel(String id) {
     NativeHttp.Cancellation c = active.get(id);
     if (c != null) c.cancel();
+  }
+
+  /** Cancel only requests that still use the replaced tail, keeping an already edited retry. */
+  public synchronized void cancelStaleForHistory(String owner, JSONArray saved) {
+    for (Map.Entry<String, NativeHttp.Cancellation> entry : active.entrySet()) {
+      JSONObject basis = activeBasis.get(entry.getKey());
+      if (basis != null && !owner.equals(basis.optString("characterId"))) continue;
+      if (basis == null || !matchesSavedBasis(basis, owner, saved)) entry.getValue().cancel();
+    }
+  }
+
+  static boolean matchesSavedBasis(JSONObject basis, String owner, JSONArray history) {
+    try {
+      if (basis == null
+          || owner == null
+          || history == null
+          || !owner.equals(basis.optString("characterId"))) return false;
+      JSONArray messages = validateShapes(basis);
+      if (history.length() < messages.length()) return false;
+      int offset = history.length() - messages.length();
+      for (int i = 0; i < messages.length(); i++) {
+        JSONObject sent = messages.getJSONObject(i), saved = history.getJSONObject(offset + i);
+        if (!sent.getString("role").equals(saved.opt("role"))
+            || !sent.getString("content").equals(saved.opt("content"))) return false;
+        if (sent.has("imageOmitted")) {
+          if (!validImage(saved.optJSONObject("image"))) return false;
+          continue;
+        }
+        if (sent.has("image") != saved.has("image")) return false;
+        if (sent.has("image")) {
+          JSONObject expected = sent.getJSONObject("image"), actual = saved.optJSONObject("image");
+          if (!validImage(actual)) return false;
+          for (String field : new String[] {"id", "mimeType", "byteLength", "width", "height"}) {
+            if (field.equals("id") || field.equals("mimeType")) {
+              if (!expected.get(field).equals(actual.get(field))) return false;
+            } else if (expected.getLong(field) != actual.getLong(field)) return false;
+          }
+        }
+      }
+      return true;
+    } catch (Exception invalid) {
+      return false;
+    }
   }
 
   public synchronized void cancelAll() {
@@ -619,8 +663,13 @@ public final class ConnectionService {
   }
 
   public JSONObject chat(JSONObject request, JSONObject persona, String id) throws Exception {
-    if (hasImages(request)) validateShapes(request);
-    else validateMessages(request);
+    validateShapes(request);
+    if (!hasImages(request)) validateMessages(request);
+    try {
+      request = new JSONObject(request.toString());
+    } catch (Exception invalid) {
+      throw new IllegalArgumentException(INPUT);
+    }
     if (id == null || !id.matches("[a-zA-Z0-9-]{1,64}")) throw new IllegalArgumentException(INPUT);
     final String u, k, m;
     final NativeHttp.Cancellation token;
@@ -641,6 +690,7 @@ public final class ConnectionService {
       m = model;
       token = new NativeHttp.Cancellation();
       active.put(id, token);
+      activeBasis.put(id, request);
     }
     try {
       PreparedImageRequest prepared =
@@ -659,6 +709,7 @@ public final class ConnectionService {
     } finally {
       synchronized (this) {
         active.remove(id);
+        activeBasis.remove(id);
       }
     }
   }

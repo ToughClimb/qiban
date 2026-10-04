@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Direct synthetic callbacks lack the URI visibility grant supplied by real SAF. -->
+    <queries>
+        <provider android:authorities="app.qiban.mobile.test.images" />
+    </queries>
+</manifest>

@@ -270,4 +270,103 @@ public class ChatImageStoreTest {
     assertTrue(checks.get() >= 2);
     assertNotNull(store.preview("lin", image.getString("id")));
   }
+
+  @Test
+  public void rollingHistoryRetainsTailAndNewImageThroughRestart() throws Exception {
+    File directory = Files.createTempDirectory("qiban-image-rolling").toFile();
+    ChatImageStore store = new ChatImageStore(directory);
+    JSONArray previous = new JSONArray();
+    for (int i = 0; i < 200; i++)
+      previous.put(
+          new JSONObject()
+              .put("id", "turn-" + i)
+              .put("role", i % 2 == 0 ? "user" : "assistant")
+              .put("content", "text " + i));
+    store.commitHistory(new JSONObject().put("lin", previous));
+    JSONObject image =
+        store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG)).getJSONObject("image");
+    JSONArray pending = new JSONArray();
+    for (int i = 2; i < previous.length(); i++) pending.put(previous.getJSONObject(i));
+    pending.put(
+        new JSONObject()
+            .put("id", "new-image-turn")
+            .put("role", "user")
+            .put("content", "")
+            .put("image", image));
+    assertEquals(199, pending.length());
+    assertFalse(ChatImageStore.tailRemovedOrChanged(previous, pending));
+    assertNotNull(store.resolve("lin", image));
+    store.commitHistory(new JSONObject().put("lin", pending));
+    assertNotNull(store.resolve("lin", image));
+    JSONArray replied =
+        new JSONArray(pending.toString())
+            .put(
+                new JSONObject()
+                    .put("id", "new-reply")
+                    .put("role", "assistant")
+                    .put("content", "reply")
+                    .put("mode", "demo"));
+    assertEquals(200, replied.length());
+    assertFalse(ChatImageStore.tailRemovedOrChanged(pending, replied));
+    store.commitHistory(new JSONObject().put("lin", replied));
+    ChatImageStore restart = new ChatImageStore(directory);
+    restart.commitHistory(new JSONObject().put("lin", replied));
+    assertFalse(ChatImageStore.tailRemovedOrChanged(replied, new JSONArray(replied.toString())));
+    assertNotNull(restart.resolve("lin", image));
+    JSONArray removed = new JSONArray();
+    for (int i = 0; i < replied.length() - 1; i++) removed.put(replied.getJSONObject(i));
+    assertTrue(ChatImageStore.tailRemovedOrChanged(replied, removed));
+    JSONObject draft =
+        restart
+            .importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG))
+            .getJSONObject("image");
+    long generation = restart.generation("lin");
+    restart.invalidatePending("lin");
+    assertTrue(restart.generation("lin") > generation);
+    assertNotNull(restart.resolve("lin", image));
+    assertNotNull(restart.resolve("lin", draft));
+  }
+
+  @Test
+  public void tailComparisonUsesSemanticFieldsRatherThanJsonKeyOrder() throws Exception {
+    JSONObject image =
+        new JSONObject()
+            .put("id", "image-01234567-89ab-cdef-0123-456789abcdef")
+            .put("mimeType", "image/jpeg")
+            .put("byteLength", 30)
+            .put("width", 100)
+            .put("height", 50);
+    JSONObject tail =
+        new JSONObject()
+            .put("id", "tail")
+            .put("role", "user")
+            .put("content", "")
+            .put("image", image);
+    JSONObject reordered =
+        new JSONObject()
+            .put("height", 50.0)
+            .put("width", 100)
+            .put("byteLength", 30)
+            .put("mimeType", "image/jpeg")
+            .put("id", image.getString("id"));
+    JSONObject candidate =
+        new JSONObject()
+            .put("image", reordered)
+            .put("content", "")
+            .put("role", "user")
+            .put("id", "tail");
+    JSONArray previous = new JSONArray().put(tail);
+    assertFalse(ChatImageStore.tailRemovedOrChanged(previous, new JSONArray().put(candidate)));
+    assertFalse(ChatImageStore.tailRemovedOrChanged(new JSONArray(), new JSONArray()));
+    for (String field : new String[] {"content", "role", "mode"}) {
+      JSONObject changed = new JSONObject(candidate.toString()).put(field, "changed");
+      assertTrue(ChatImageStore.tailRemovedOrChanged(previous, new JSONArray().put(changed)));
+    }
+    JSONObject changedImage = new JSONObject(reordered.toString()).put("width", 99);
+    assertTrue(
+        ChatImageStore.tailRemovedOrChanged(
+            previous,
+            new JSONArray().put(new JSONObject(candidate.toString()).put("image", changedImage))));
+    assertTrue(ChatImageStore.tailRemovedOrChanged(previous, new JSONArray()));
+  }
 }
