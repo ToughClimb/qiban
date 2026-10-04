@@ -1,6 +1,7 @@
 import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import type { ChatRequest } from "../shared/characters.js";
-import { modelRequest, finalText, LIVE_MODEL } from "./model.js";
+import type { ChatImageResolver } from "./image-chat.js";
+import { prepareImageModelRequest, finalText, LIVE_MODEL } from "./model.js";
 export { LIVE_MODEL, MAX_OUTPUT_TOKENS } from "./model.js";
 
 export type Mode = "demo" | "live";
@@ -76,26 +77,33 @@ export const providerFetch: ProviderFetch = (url, options) =>
 export function createProvider(
   config: Config,
   fetcher: ProviderFetch = providerFetch,
+  resolveImage?: ChatImageResolver,
 ): Provider {
   if (config.mode === "demo")
-    return { reply: async (request) => demoReply(request) };
+    return { reply: async (request) => {
+      if (request.messages.some(message => message.image || message.imageOmitted))
+        throw new Error("Image attachments are unavailable in demo mode");
+      return demoReply(request);
+    } };
   // Cloud network secrets are substituted by the HTTPS proxy. Never bypass it.
   const dispatcher = new EnvHttpProxyAgent();
   return {
     close: () => dispatcher.close(),
     async reply(request, signal) {
+      const requestSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(25_000)])
+        : AbortSignal.timeout(25_000);
+      const { body } = await prepareImageModelRequest(request, LIVE_MODEL, true, undefined, resolveImage, requestSignal);
       const options = {
         method: "POST",
         redirect: "error" as const,
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(25_000)])
-          : AbortSignal.timeout(25_000),
+        signal: requestSignal,
         dispatcher,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify(modelRequest(request, LIVE_MODEL, true)),
+        body: JSON.stringify(body),
       };
       const response = await fetcher(
         "https://api.deepseek.com/chat/completions",
