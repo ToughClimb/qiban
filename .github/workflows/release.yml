@@ -1,0 +1,175 @@
+name: Reviewed preview release
+on:
+  push:
+    tags: [qiban-preview-*]
+permissions:
+  contents: read
+concurrency:
+  group: preview-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  preflight:
+    if: github.repository == 'ToughClimb/qiban'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/release-policy.test.mjs
+      - name: Exact-SHA CI and early draft permission check
+        run: node scripts/release-api.mjs preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  windows:
+    needs: preflight
+    runs-on: windows-2022
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    outputs:
+      manifest: ${{ steps.upload.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run desktop:build
+      - name: Embed reviewed build identity
+        run: node scripts/release-packages.mjs stamp windows
+      - run: npx --no-install electron-forge make --platform=win32 --arch=x64
+      - name: Connection, focus, avatar, theme and image UI regressions
+        shell: pwsh
+        run: |
+          $checks = @('connection-panel-smoke.mjs', 'composer-focus-smoke.mjs', 'avatar-ui-smoke.mjs', 'appearance-ui-smoke.mjs', 'image-chat-ui-smoke.mjs')
+          foreach ($check in $checks) {
+            node "tests/$check"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+        env:
+          CHROMIUM_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
+      - name: Native HTTPS reachability without inference
+        run: node --import tsx tests/native-provider-reachability.ts
+        timeout-minutes: 1
+      - name: Installer lifecycle using synthetic data
+        run: node tests/installer-smoke.mjs
+        timeout-minutes: 6
+      - name: Actual packaged application smoke
+        shell: pwsh
+        run: |
+          $env:QIBAN_PACKAGED_EXE = (Resolve-Path 'out/Qiban-win32-x64/Qiban.exe').Path
+          npm run test:desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify packaged licenses, provenance and private-file exclusion
+        run: node scripts/release-packages.mjs prepare windows
+      - name: Upload exact verified Windows assets to draft
+        id: upload
+        run: node scripts/release-api.mjs upload windows
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  android:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    outputs:
+      manifest: ${{ steps.upload.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Require emulator acceleration and installed Android SDK
+        shell: bash
+        run: |
+          test -c /dev/kvm || { echo 'Release blocked: API35 emulator requires KVM.'; exit 1; }
+          sudo chmod a+rw /dev/kvm
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager" || { echo 'Release blocked: standard runner Android SDK is unavailable.'; exit 1; }
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          set +o pipefail
+          yes | "$sdkmanager" --sdk_root="$sdk_root" --licenses > /dev/null
+          set -o pipefail
+          "$sdkmanager" --sdk_root="$sdk_root" 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0'
+      - run: npm ci
+      - run: npm test
+      - run: npm run android:sync
+      - name: Embed reviewed build identity
+        run: node scripts/release-packages.mjs stamp android
+      - run: npm run android:test
+      - run: npm run android:unsigned
+      - name: Build installable disposable test APK
+        run: npm run android:debug
+      - name: API35 installation and native demo smoke
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest
+            node android/tools/emulator-smoke.mjs
+      - name: Verify test certificate and record public identity
+        shell: bash
+        run: |
+          certificate_file="$RUNNER_TEMP/qiban-test-certificate.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/debug/app-debug.apk > "$certificate_file"
+          echo "QIBAN_TEST_CERTIFICATE=$certificate_file" >> "$GITHUB_ENV"
+      - name: Verify packaged licenses, provenance and private-file exclusion
+        run: node scripts/release-packages.mjs prepare android
+      - name: Upload exact verified test APK and notices to draft
+        id: upload
+        run: node scripts/release-api.mjs upload android
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify every uploaded digest and publish prerelease
+        run: node scripts/release-api.mjs publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QIBAN_WINDOWS_MANIFEST: ${{ needs.windows.outputs.manifest }}
+          QIBAN_ANDROID_MANIFEST: ${{ needs.android.outputs.manifest }}
