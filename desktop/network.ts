@@ -2,11 +2,13 @@ import { request } from "node:https";
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import type { LookupAddress } from "node:dns";
+import { configuredProxy, PinnedProxyAgent, ProxyConnectError } from "./proxy.js";
 
 export class ConnectionError extends Error {
   constructor(
     public code: string,
     message: string,
+    public readonly httpStatus?: number,
   ) {
     super(message);
   }
@@ -117,8 +119,18 @@ export type JsonTransport = (
 export function createJsonTransport(
   resolveHost: (host: string) => Promise<LookupAddress[]> = publicAddresses,
   requester: typeof request = request,
+  env: NodeJS.ProcessEnv = process.env,
 ): JsonTransport {
   return async (url, key, body, callerSignal) => {
+    // The transport also validates callers outside DesktopService; this does not
+    // rewrite the request path (models/chat/completions remain exact).
+    normalizeEndpoint(url.href);
+    let proxy: URL | undefined;
+    try {
+      proxy = configuredProxy(env);
+    } catch {
+      throw new ConnectionError("proxy", "代理设置无效，请检查网络配置。");
+    }
     const signal = callerSignal
       ? AbortSignal.any([
           callerSignal,
@@ -151,12 +163,13 @@ export function createJsonTransport(
       );
     }
     const pinned = addresses.find((item) => item.family === 4) ?? addresses[0];
+    const agent = proxy ? new PinnedProxyAgent(proxy, url, pinned, signal) : undefined;
     return new Promise((resolve, reject) => {
       const req = requester(
         url,
         {
           method: body ? "POST" : "GET",
-          agent: false,
+          agent: agent ?? false,
           signal,
           family: pinned.family,
           lookup: (_host, _options, callback) =>
@@ -228,9 +241,16 @@ export function createJsonTransport(
           );
         },
       );
-      req.on("error", () =>
+      req.once("close", () => agent?.destroy());
+      req.on("error", (error) =>
         reject(
-          new ConnectionError(
+          error instanceof ProxyConnectError
+            ? new ConnectionError(
+                "proxy",
+                "代理服务器未能建立连接，请检查网络配置。",
+                error.status,
+              )
+            : new ConnectionError(
             signal.aborted
               ? callerSignal?.aborted
                 ? "cancelled"

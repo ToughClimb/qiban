@@ -79,6 +79,7 @@ test("real HTTPS transport pins DNS and never follows any redirect or leaks its 
         callback,
       );
     }) as typeof request,
+    {},
   );
   for (const code of [301, 302, 303, 307, 308])
     await assert.rejects(
