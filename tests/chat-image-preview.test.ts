@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { safeChatImagePreview } from "../src/chatImagePreview";
+import { safeChatImagePreview } from "../src/chatImageUrl";
 
 test("chat previews accept bounded local raster data, never arbitrary URLs or SVG", () => {
   const image = readFileSync(new URL("./fixtures/chat-image.png", import.meta.url));

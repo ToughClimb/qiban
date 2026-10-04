@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ChatImageAttachment } from "../shared/image-chat";
 import { desktopBridge } from "./api";
-import { safeChatImagePreview } from "./chatImagePreview";
+import { safeChatImagePreview } from "./chatImageUrl";
 
 export function ChatImagePreview({ characterId, image, omitted = false }: {
   characterId: string;

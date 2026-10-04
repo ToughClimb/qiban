@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isChatImageAttachment, type ChatImageAttachment, type ChatImageDraft } from "../shared/image-chat";
 import { desktopBridge } from "./api";
-import { safeChatImagePreview } from "./chatImagePreview";
+import { safeChatImagePreview } from "./chatImageUrl";
 
 type OwnedDraft = ChatImageDraft & { characterId: string; discardable: boolean };
 export function useChatImageDraft(characterId: string) {
