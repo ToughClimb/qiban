@@ -30,3 +30,9 @@ HTTPS public endpoints only. Local/private/reserved DNS answers, embedded creden
 `npm test` covers storage failures, host changes, DNS restrictions, cancellation, history, and real local HTTPS redirect handling using synthetic credentials. `npm run test:desktop` runs Electron onboarding/chat/restart and renderer security checks; on Linux it needs a display and uses the test runner's no-sandbox launch flag. Production windows retain sandbox, context isolation and web security. Passing on Linux is not Windows installer acceptance.
 
 Local V1/V2 JSON character import, preview, original-source export, creation, editing and backups are available under 管理角色. See `CHARACTER_CARDS.md` for supported fields, limits and closed-app maintenance.
+
+## Installer lifecycle CI
+
+`tests/installer-smoke.mjs` is restricted to the disposable Windows CI runner. It refuses existing installations or user data, runs the real Squirrel installer in documented silent mode, sends one offline synthetic message, seeds an original synthetic card and DPAPI-encrypted synthetic key, then verifies relaunch. It generates a higher NuGet package version from the unchanged application payload to check an actual installer upgrade and exact preservation of user-file bytes, then runs the installed updater’s uninstaller and checks removal. The upgrade package is ephemeral and is not uploaded.
+
+This uses the hosted runner’s existing administrator account; UAC is disabled by the runner image. It does not create accounts, change security settings, purchase signing or bypass warnings. Passing this test establishes per-user paths and lifecycle behavior under that runner account. It does not establish ordinary-user installation, manual SmartScreen acceptance, Chinese IME behavior or upgrade behavior across future schema changes.

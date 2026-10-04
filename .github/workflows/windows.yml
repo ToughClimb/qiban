@@ -20,6 +20,9 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run desktop:make
+      - name: Installer lifecycle with synthetic data
+        run: node tests/installer-smoke.mjs
+        timeout-minutes: 6
       - name: Smoke test packaged application
         shell: pwsh
         run: |
