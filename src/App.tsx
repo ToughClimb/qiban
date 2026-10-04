@@ -11,6 +11,9 @@ import type { Character } from "../shared/characters";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
+import { ChatComposer } from "./ChatComposer";
+import { useChatImageDraft } from "./useChatImageDraft";
+import type { ChatReply as NativeChatReply } from "../shared/desktop";
 import { applyAccent, clearAppearance, storedAccent } from "./appearance";
 import {
   ChatError,
@@ -43,6 +46,10 @@ export function App() {
   const [storageReady, setStorageReady] = useState(!desktop);
   const [deletingData, setDeletingData] = useState(false);
   const [selected, setSelected] = useState<CharacterId>("lin");
+  const imageDraft = useChatImageDraft(selected);
+  const [editingImageId, setEditingImageId] = useState<string | null>(null);
+  const [omittedImages, setOmittedImages] =
+    useState<Partial<Record<CharacterId, string[]>>>({});
   const [conversations, setConversations] = useState(() =>
     desktop ? {} : loadSaved(),
   );
@@ -65,7 +72,8 @@ export function App() {
     companions.find((item) => item.id === selected) ?? characters[0];
   const messages = conversations[selected] ?? [];
   const draft = drafts[selected] ?? "";
-  const unanswered = messages.at(-1)?.role === "user";
+  const unanswered =
+    messages.at(-1)?.role === "user" && messages.at(-1)?.id !== editingImageId;
   const locked = !desktop && mode === "live" && !accessToken;
 
   useEffect(() => {
@@ -156,7 +164,7 @@ export function App() {
     };
   }, []);
   useEffect(() => {
-    if (busy || request.current || !restoreComposerFocus.current) return;
+    if (busy || imageDraft.picking || request.current || !restoreComposerFocus.current) return;
     restoreComposerFocus.current = false;
     const composerInput = input.current;
     if (
@@ -167,10 +175,12 @@ export function App() {
         composerInput.closest(".composer")?.contains(document.activeElement))
     )
       composerInput.focus();
-  }, [busy, messages, locked, mode, storageReady]);
+  }, [busy, imageDraft.picking, imageDraft.draft, messages, locked, mode, storageReady]);
 
   function cancelRequest() {
     restoreComposerFocus.current = false;
+    imageDraft.clear();
+    setEditingImageId(null);
     request.current?.abort();
     request.current = null;
     setBusy(false);
@@ -200,6 +210,13 @@ export function App() {
       );
       if (request.current !== controller) return;
       setMode(reply.mode);
+      const omitted = (reply as NativeChatReply).omittedImageIds ?? [];
+      setOmittedImages((current) => ({
+        ...current,
+        [id]: omitted.filter((imageId) =>
+          history.some((message) => message.image?.id === imageId),
+        ),
+      }));
       if (reply.mode === "demo") setAccessToken("");
       setConversations((current) =>
         replaceConversation(current, id, [
@@ -234,32 +251,45 @@ export function App() {
   function submit(event: FormEvent) {
     event.preventDefault();
     if (
-      !draft.trim() ||
+      (!draft.trim() && !imageDraft.draft) ||
       draft.trim().length > MAX_MESSAGE_LENGTH ||
       busy ||
+      imageDraft.picking ||
       unanswered ||
       !mode ||
       !storageReady ||
       locked
     )
       return;
+    const image = imageDraft.take();
     const history: Message[] = [
-      ...messages,
-      { id: crypto.randomUUID(), role: "user", content: draft.trim() },
+      ...(editingImageId ? messages.slice(0, -1) : messages),
+      {
+        id: editingImageId ?? crypto.randomUUID(),
+        role: "user",
+        content: draft.trim(),
+        ...(image ? { image } : {}),
+      },
     ];
     setConversations((current) =>
       replaceConversation(current, selected, history),
     );
     setDrafts((current) => ({ ...current, [selected]: "" }));
+    setEditingImageId(null);
     void reply(history);
   }
-  function editPending() {
+  async function editPending() {
     const last = messages.at(-1);
-    if (busy || last?.role !== "user") return;
+    if (busy || imageDraft.picking || last?.role !== "user") return;
     cancelRequest();
-    setConversations((current) =>
-      replaceConversation(current, selected, messages.slice(0, -1)),
-    );
+    if (last.image) {
+      if (!await imageDraft.restore(last.image)) return;
+      setEditingImageId(last.id);
+    } else {
+      setConversations((current) =>
+        replaceConversation(current, selected, messages.slice(0, -1)),
+      );
+    }
     setDrafts((current) => ({ ...current, [selected]: last.content }));
     setError("");
     setTimeout(() => input.current?.focus(), 0);
@@ -273,6 +303,7 @@ export function App() {
       return;
     cancelRequest();
     setConversations((current) => resetConversation(current, selected));
+    setOmittedImages((current) => ({ ...current, [selected]: [] }));
     setDrafts((current) => ({ ...current, [selected]: "" }));
     setError("");
     input.current?.focus();
@@ -356,7 +387,7 @@ export function App() {
               aria-label="清空聊天"
               type="button"
               onClick={reset}
-              disabled={!messages.length}
+              disabled={!messages.length && !imageDraft.draft && !imageDraft.picking}
             >
               清空
             </button>
@@ -421,70 +452,42 @@ export function App() {
         )}
         <ChatMessages
           character={character}
-          messages={messages}
+          messages={editingImageId ? messages.slice(0, -1) : messages}
           mode={mode}
           busy={busy}
           error={error}
-          retryDisabled={!mode || locked}
+          retryDisabled={!mode || locked || imageDraft.picking}
+          editDisabled={imageDraft.picking}
+          omittedImageIds={omittedImages[selected]}
           onRetry={() => void reply(messages)}
-          onEdit={editPending}
+          onEdit={() => void editPending()}
           scrollArea={scrollArea}
         />
         <div className="composer-area">
-          <form className="composer" onSubmit={submit}>
-            <label className="sr-only" htmlFor="message">
-              给{character.name}发消息
-            </label>
-            <textarea
-              ref={input}
-              id="message"
-              placeholder={
-                unanswered
-                  ? "先等待回复，或重试、编辑上一条消息"
-                  : "说点什么…"
-              }
-              rows={2}
-              aria-description="Enter 发送，Shift + Enter 换行"
-              maxLength={MAX_MESSAGE_LENGTH}
-              value={draft}
-              onChange={(event) =>
-                setDrafts((current) => ({
-                  ...current,
-                  [selected]: event.target.value,
-                }))
-              }
-              disabled={busy || unanswered || locked || !mode || !storageReady}
-              onKeyDown={(event) => {
-                if (
-                  event.key === "Enter" &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault();
-                  submit(event);
-                }
-              }}
-            />
-            <div className="composer-bottom">
-              {draft.length > 1800 && (
-                <span>{draft.length}/{MAX_MESSAGE_LENGTH}</span>
-              )}
-              <button
-                className="send-button"
-                type="submit"
-                disabled={
-                  !draft.trim() ||
-                  busy ||
-                  unanswered ||
-                  locked ||
-                  !mode ||
-                  !storageReady
-                }
-              >
-                发送 <span aria-hidden="true">↑</span>
-              </button>
-            </div>
-          </form>
+          <ChatComposer
+            name={character.name}
+            draft={draft}
+            image={imageDraft.draft}
+            mode={mode}
+            disabled={busy || imageDraft.picking || unanswered || locked || !mode || !storageReady}
+            unanswered={unanswered}
+            input={input}
+            onChange={(value) => setDrafts((current) => ({ ...current, [selected]: value }))}
+            onSubmit={submit}
+            onPick={() => {
+              restoreComposerFocus.current =
+                input.current?.closest(".composer")?.contains(document.activeElement) ?? false;
+              void imageDraft.pick();
+            }}
+            onRemove={() => {
+              restoreComposerFocus.current = true;
+              imageDraft.clear();
+            }}
+            onImageError={imageDraft.failPreview}
+          />
+          {imageDraft.error && (
+            <p className="image-error" role="alert">{imageDraft.error}</p>
+          )}
           {storageError && (
             <p className="privacy-note storage-warning" role="status">
               {desktop

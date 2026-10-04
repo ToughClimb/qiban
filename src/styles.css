@@ -401,8 +401,8 @@ button {
 }
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 16px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px 10px;
   padding: 13px 16px 11px;
   border: 1px solid #cdd3c5;
   border-radius: 12px;
@@ -414,6 +414,8 @@ button {
   outline-offset: 2px;
 }
 .composer textarea {
+  grid-column: 2;
+  grid-row: 1;
   display: block;
   resize: none;
   width: 100%;
@@ -445,10 +447,59 @@ button {
   color: var(--muted);
 }
 .composer .send-button {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   align-self: center;
 }
+.attach-button {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 44px;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  border: 0;
+  border-radius: 6px;
+}
+.attach-button:hover:enabled { background: var(--accent-tint); }
+.attach-button:disabled { background: transparent; color: var(--muted); opacity: .45; }
+.image-draft {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.has-image textarea, .has-image .attach-button, .has-image .send-button { grid-row: 2; }
+.has-image .composer-bottom > span { grid-row: 3; }
+.image-draft img {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.image-draft > div { min-width: 0; font-size: 12px; }
+.image-draft small { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.image-draft .remove-image { margin-left: auto; width: 44px; height: 44px; padding: 0; font-size: 22px; flex-shrink: 0; }
+.image-error { color: #88452e; font-size: 12px; line-height: 1.7; margin: 10px 0 0; }
+.chat-image { margin: 0 0 8px; max-width: 240px; }
+.chat-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  width: auto;
+  height: auto;
+  border-radius: 9px;
+}
+.image-placeholder { display: block; padding: 18px 0; color: var(--muted); font-size: 12px; }
+.chat-image figcaption { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .send-button {
   background: var(--accent);
   color: #fffefa;
