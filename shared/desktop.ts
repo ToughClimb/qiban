@@ -19,6 +19,8 @@ export type ConnectionInput = {
   remember: boolean;
 };
 export type DesktopBridge = {
+  importAvatar?(id: string): Promise<Result<string | null>>;
+  deleteAvatar?(id: string): Promise<Result<void>>;
   cards(): Promise<Result<CardList>>;
   importCard(): Promise<Result<CardPreview | null>>;
   editFields(id: string): Promise<Result<CardFields>>;

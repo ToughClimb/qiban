@@ -137,6 +137,59 @@ try {
   );
   const connection = await page.evaluate(() => window.qiban.status());
   expect(connection.ok && connection.value.hasKey).toBe(false);
+  const customId = await page.evaluate(async () => {
+    const result = await window.qiban.cards();
+    return result.value.characters.find((character) => character.name === "Native custom fixture").id;
+  });
+  const avatarSources = await page.evaluate(() => ["png", "jpeg", "webp"].map((format, index) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 640; canvas.height = 320;
+    const context = canvas.getContext("2d");
+    context.fillStyle = ["#446650", "#a05040", "#4050a0"][index];
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const data = canvas.toDataURL(`image/${format}`);
+    if (!data.startsWith(`data:image/${format};base64,`)) throw new Error("Fixture encoder unavailable");
+    return { format, bytes: data.split(",")[1] };
+  }));
+  let avatarUrl;
+  const avatarFiles = [];
+  for (const source of avatarSources) {
+    const file = join(directory, `synthetic-avatar.${source.format}`);
+    avatarFiles.push(file);
+    await writeFile(file, Buffer.from(source.bytes, "base64"));
+    await application.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, file);
+    const imported = await page.evaluate(() => window.qiban.importAvatar("lin"));
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    avatarUrl = imported.value;
+    expect(avatarUrl).toMatch(/^qiban:\/\/app\/avatars\/lin\/[0-9a-f]{64}\.png$/);
+    expect(await page.evaluate(async (url) => {
+      const image = new Image(); image.src = url; await image.decode();
+      return [image.naturalWidth, image.naturalHeight];
+    }, avatarUrl)).toEqual([512, 256]);
+    expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+  }
+  await application.evaluate(({ dialog }) => {
+    dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+  });
+  expect(await page.evaluate(() => window.qiban.importAvatar("lin"))).toEqual({ ok: true, value: null });
+  const invalidAvatar = join(directory, "invalid-avatar.png");
+  await writeFile(invalidAvatar, "<svg onload='throw new Error()'/>");
+  await application.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+  }, invalidAvatar);
+  expect((await page.evaluate(() => window.qiban.importAvatar("lin"))).ok).toBe(false);
+  expect((await page.evaluate(() => window.qiban.importAvatar("../outside"))).ok).toBe(false);
+  await application.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+  }, avatarFiles[0]);
+  expect((await page.evaluate((id) => window.qiban.importAvatar(id), customId)).ok).toBe(true);
+  await application.close(); application = undefined;
+  page = await launch();
+  const restoredAvatars = await page.evaluate(() => window.qiban.cards());
+  expect(restoredAvatars.value.characters.find((character) => character.id === "lin").avatarUrl).toBe(avatarUrl);
+  expect(restoredAvatars.value.characters.find((character) => character.id === customId).avatarUrl).toContain(customId);
   const fixturePath = join(directory, "import-fixture.json");
   const fixtureSource = JSON.stringify({
     name: "Import fixture",
@@ -187,6 +240,18 @@ try {
     page.getByRole("heading", { name: "林野", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "关闭角色管理" }).click();
+  expect((await page.evaluate((id) => window.qiban.deleteCard(id), customId)).ok).toBe(true);
+  await expect(readFile(join(dataPath, "avatars", `${customId}.png`))).rejects.toThrow();
+  expect((await page.evaluate(() => window.qiban.deleteAvatar("lin"))).ok).toBe(true);
+  const withoutAvatar = await page.evaluate(() => window.qiban.cards());
+  expect(withoutAvatar.value.characters.find((character) => character.id === "lin").avatarUrl).toBeUndefined();
+  await application.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+  }, avatarFiles[0]);
+  expect((await page.evaluate(() => window.qiban.importAvatar("moon"))).ok).toBe(true);
+  expect((await page.evaluate(() => window.qiban.deleteData())).ok).toBe(true);
+  await expect(readFile(join(dataPath, "avatars", "moon.png"))).rejects.toThrow();
+  console.log("PASS native avatar picker: real PNG/JPEG/WebP decode/resize, invalid input, cancel, persistence, role deletion and all-data deletion; app-owned image URLs only");
   const untrusted = await application.evaluate(
     async ({ BrowserWindow, app }) => {
       const win = new BrowserWindow({

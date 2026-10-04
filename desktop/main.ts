@@ -13,6 +13,8 @@ import { readFile, rm } from "node:fs/promises";
 import { rmSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join, sep, extname } from "node:path";
 import { CardStore, sourceText } from "./cards.js";
+import { AvatarStore, avatarId } from "./avatars.js";
+import { decodeAvatar } from "./image-decode.js";
 import { ConnectionStore } from "./store.js";
 import { HistoryStore } from "./history.js";
 import { DesktopService } from "./service.js";
@@ -59,6 +61,9 @@ if (locked)
     .whenReady()
     .then(async () => {
       const renderer = resolve(__dirname, "renderer");
+      const directory = app.getPath("userData");
+      const avatars = new AvatarStore(directory);
+      let avatarRevision = 0;
       protocol.handle("qiban", async (req) => {
         const url = new URL(req.url);
         let path: string;
@@ -66,6 +71,20 @@ if (locked)
           path = decodeURIComponent(url.pathname);
         } catch {
           return new Response("", { status: 400 });
+        }
+        if (path.startsWith("/avatars/")) {
+          if (req.method !== "GET" || url.host !== "app" || url.search || url.hash)
+            return new Response("", { status: 403 });
+          const match = /^\/avatars\/([a-z0-9-]+)\/([0-9a-f]{64})\.png$/.exec(path);
+          const bytes = match ? avatars.image(match[1], match[2]) : undefined;
+          return bytes
+            ? new Response(new Uint8Array(bytes), { headers: {
+                "Content-Type": "image/png",
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+                "Cross-Origin-Resource-Policy": "same-origin",
+              } })
+            : new Response("", { status: 404 });
         }
         const file = resolve(renderer, `.${path}`);
         const mime: Record<string, string> = {
@@ -97,7 +116,6 @@ if (locked)
           return new Response("", { status: 404 });
         }
       });
-      const directory = app.getPath("userData");
       const store = new ConnectionStore(directory, {
         isEncryptionAvailable: () =>
           safeStorage.isEncryptionAvailable() &&
@@ -140,7 +158,31 @@ if (locked)
       }
       handle("cards:list", () => {
         service!.cancelAll();
-        return cards.list();
+        const result = cards.list();
+        return { ...result, characters: result.characters.map((character) => {
+          const avatarUrl = avatars.url(character.id);
+          return avatarUrl ? { ...character, avatarUrl } : character;
+        }) };
+      });
+      handle("avatars:import", async (value) => {
+        const id = avatarId(value);
+        if (!cards.has(id)) throw new ConnectionError("avatar", "角色不存在，请重新加载。");
+        const revision = avatarRevision;
+        const result = await dialog.showOpenDialog(window!, {
+          title: "选择角色头像",
+          filters: [{ name: "本地头像图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+          properties: ["openFile"],
+        });
+        if (result.canceled) return null;
+        if (revision !== avatarRevision || !cards.has(id))
+          throw new ConnectionError("cancelled", "头像导入已取消。");
+        return avatars.import(id, result.filePaths[0], decodeAvatar);
+      });
+      handle("avatars:delete", (value) => {
+        const id = avatarId(value);
+        if (!cards.has(id)) throw new ConnectionError("avatar", "角色不存在，请重新加载。");
+        avatarRevision++;
+        avatars.delete(id);
       });
       handle("cards:fields", (id) => cards.fields(id));
       handle("cards:preview", (id, fields) => cards.editPreview(id, fields));
@@ -180,6 +222,8 @@ if (locked)
         const saved = history.load();
         service!.cancelAll();
         cards.delete(id);
+        avatarRevision++;
+        avatars.delete(id);
         delete saved[id];
         history.save(saved);
       });
@@ -211,6 +255,8 @@ if (locked)
         service!.deleteData();
         history.clear();
         cards.clear();
+        avatarRevision++;
+        avatars.clear();
         await window!.webContents.session.clearStorageData();
         await window!.webContents.session.clearCache();
       });

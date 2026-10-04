@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/desktop.js";
 const bridge: DesktopBridge = {
+  importAvatar: (id) => ipcRenderer.invoke("avatars:import", id),
+  deleteAvatar: (id) => ipcRenderer.invoke("avatars:delete", id),
   cards: () => ipcRenderer.invoke("cards:list"),
   importCard: () => ipcRenderer.invoke("cards:import"),
   editFields: (id) => ipcRenderer.invoke("cards:fields", id),

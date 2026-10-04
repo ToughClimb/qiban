@@ -14,6 +14,31 @@ source shape, not Qiban's internal camelCase persona. Unsupported instructions,
 lorebooks and extensions remain in exported files but do not affect Qiban chat.
 Read another application's own import requirements before using those fields there.
 
+## Local avatar images
+
+Avatars are separate from JSON character cards. The optional native bridge
+`importAvatar(id)` opens a local PNG/JPEG/WebP picker and returns an app-owned
+`qiban://app/avatars/...` URL, or `null` on cancellation. `deleteAvatar(id)` removes
+that image. `cards()` supplies `Character.avatarUrl` only from validated local
+storage; raw card image URLs are ignored. Renderers should retain the existing
+portrait when this optional field or these optional capabilities are absent.
+
+Source images must be regular files, at most 5 MiB and 4096 pixels on either
+side. Static formats are checked before decoding in an isolated temporary
+Chromium document. Images are resized to at most 512 pixels on either side,
+encoded as PNG and stripped of metadata. Source files remain unchanged. No
+remote image fetch, image character-card metadata import or model image input
+is performed.
+
+`avatars/<character-id>.png` uses the existing built-in or custom stable ID.
+Include `avatars` alongside `cards` and `history.json` in closed-app backups and
+restores. Exporting a character JSON does not embed its avatar; restoring the
+same filenames preserves the association. Removing an avatar leaves character
+text and chat intact. Deleting a custom role deletes its avatar and chat;
+explicit data deletion and uninstall remove the avatar directory. Changing an
+image replaces the previous app-owned copy; avatar revision backups are not
+created.
+
 ## Local files and AI-assisted editing
 
 Windows data lives at `%APPDATA%\Qiban`. In **管理角色**, **打开角色文件夹** opens
@@ -25,7 +50,7 @@ untouched. **重新加载角色文件** applies external edits and cancels any o
 It retains chat history; reset that character separately when the new setting
 should start a fresh conversation.
 
-For an AI coding assistant: close Qiban first, copy `cards` and `history.json` to
+For an AI coding assistant: close Qiban first, copy `cards`, `avatars` (when present) and `history.json` to
 a dated backup, then edit only supported persona fields. Do not change connection
 settings, add tools/provider/credential fields, or edit the installed application.
 Validate source files from a repository checkout:

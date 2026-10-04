@@ -119,6 +119,9 @@ try {
   );
   await close();
   await mkdir(join(dataRoot, "cards"), { recursive: true });
+  await mkdir(join(dataRoot, "avatars"), { recursive: true });
+  await writeFile(join(dataRoot, "avatars", `${cardId}.png`), Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=", "base64"));
   await writeFile(
     join(dataRoot, "cards", `${cardId}.json`),
     JSON.stringify({
@@ -141,9 +144,10 @@ try {
     "history.json",
     "connection.json",
     join("cards", `${cardId}.json`),
+    join("avatars", `${cardId}.png`),
   ];
   const snapshot = await Promise.all(
-    files.map((file) => readFile(join(dataRoot, file), "utf8")),
+    files.map((file) => readFile(join(dataRoot, file))),
   );
   page = await launch(version);
   await expect(
@@ -181,7 +185,7 @@ try {
   );
   assert.deepEqual(
     await Promise.all(
-      files.map((file) => readFile(join(dataRoot, file), "utf8")),
+      files.map((file) => readFile(join(dataRoot, file))),
     ),
     snapshot,
     "Upgrade must preserve exact synthetic user-file bytes",
@@ -212,6 +216,7 @@ try {
     "connection.json",
     "connection.json.tmp",
     "cards",
+    "avatars",
   ];
   await expect
     .poll(
