@@ -22,12 +22,15 @@ public class QibanPlugin extends Plugin {
   private ConnectionService connection;
   private DataStore data;
   private AvatarStore avatars;
+  private ChatImageStore chatImages;
   private volatile boolean destroyed;
   private PluginCall pendingPickerCall;
   private final java.util.Set<InputStream> openImports =
       java.util.Collections.synchronizedSet(new java.util.HashSet<>());
   private String pendingExport;
   private boolean pickerBusy;
+  private String pendingChatImageOwner;
+  private long pendingChatImageGeneration;
   private boolean keyDialogBusy;
   private AlertDialog keyDialog;
   private EditText keyInput;
@@ -104,7 +107,33 @@ public class QibanPlugin extends Plugin {
                   "无法读取头像",
                   "无法转换头像",
                   "本地头像容量已满",
-                  "转换后的头像超过容量限制")));
+                  "转换后的头像超过容量限制",
+                  "不支持动画图片",
+                  "仅支持静态 PNG、JPEG 或 WebP 聊天图片",
+                  "图片无法安全读取，请重新选择图片后重试。",
+                  "图片聊天需要支持图片的 DeepSeek 服务和 deepseek-flash 模型。",
+                  "聊天已清空，请重新选择图片。",
+                  "无法保存聊天图片",
+                  "无法创建聊天图片目录",
+                  "无法删除聊天图片草稿",
+                  "无法清除会话图片",
+                  "无法清除聊天图片",
+                  "无法读取聊天图片",
+                  "无法转换聊天图片",
+                  "本地聊天图片容量已满",
+                  "演示模式暂不支持图片聊天，请先连接支持图片的服务。",
+                  "聊天图片尺寸或格式无效",
+                  "聊天图片引用与文件不一致",
+                  "聊天图片引用格式无效",
+                  "聊天图片所属角色无效",
+                  "聊天图片文件损坏",
+                  "聊天图片标识无效",
+                  "聊天图片格式无效",
+                  "聊天图片清理未完成",
+                  "聊天图片缺失或损坏",
+                  "聊天图片读取已取消",
+                  "聊天图片超过 5 MiB 限制",
+                  "转换后的聊天图片超过容量限制")));
   private static final int MAX_AVATAR_BYTES = 5 * 1024 * 1024;
   private static final java.util.regex.Pattern AVATAR_ID =
       java.util.regex.Pattern.compile(
@@ -117,9 +146,10 @@ public class QibanPlugin extends Plugin {
 
   @Override
   public void load() {
-    connection = new ConnectionService(getContext());
     data = new DataStore(getContext());
     avatars = new AvatarStore(getContext());
+    chatImages = new ChatImageStore(getContext());
+    connection = new ConnectionService(getContext(), chatImages);
   }
 
   private void ok(PluginCall call, Object value) {
@@ -287,13 +317,34 @@ public class QibanPlugin extends Plugin {
           connection.deleteAll();
           data.deleteAll();
           avatars.deleteAll();
-          return null;
+          chatImages.deleteAll();
+          getActivity()
+              .runOnUiThread(
+                  () -> {
+                    if (destroyed) {
+                      fail(call, "已取消连接。");
+                      return;
+                    }
+                    OriginStorageReset.clear(
+                        getBridge().getWebView(),
+                        cleared -> {
+                          if (cleared && !destroyed) ok(call, null);
+                          else fail(call, "无法清除网页本地数据，请重试。");
+                        });
+                  });
+          return Deferred.VALUE;
         });
   }
 
   @PluginMethod
   public void loadHistory(PluginCall call) {
-    run(call, () -> data.loadHistory());
+    run(
+        call,
+        () -> {
+          JSONObject history = data.loadHistory();
+          chatImages.commitHistory(history);
+          return history;
+        });
   }
 
   @PluginMethod
@@ -301,7 +352,21 @@ public class QibanPlugin extends Plugin {
     run(
         call,
         () -> {
-          data.saveHistory(call.getObject("history"));
+          JSONObject history = call.getObject("history");
+          synchronized (chatImages) {
+            chatImages.validateReferences(history);
+            JSONObject previous = data.loadHistory();
+            data.saveHistory(history);
+            java.util.Iterator<String> owners = previous.keys();
+            while (owners.hasNext()) {
+              String owner = owners.next();
+              if (!history.has(owner) || history.getJSONArray(owner).length() == 0) {
+                connection.cancelAll();
+                chatImages.deleteConversation(owner);
+              }
+            }
+            chatImages.commitHistory(history);
+          }
           return null;
         });
   }
@@ -328,8 +393,10 @@ public class QibanPlugin extends Plugin {
         call,
         () -> {
           String id = required(call, "id");
+          connection.cancelAll();
           data.deleteCard(id);
           avatars.delete(id);
+          chatImages.deleteConversation(id);
           return null;
         });
   }
@@ -346,6 +413,7 @@ public class QibanPlugin extends Plugin {
     } catch (RuntimeException error) {
       pickerBusy = false;
       pendingPickerCall = null;
+      pendingChatImageOwner = null;
       pendingExport = null;
       fail(call, "无法打开文件选择器，请稍后重试。");
     }
@@ -433,6 +501,92 @@ public class QibanPlugin extends Plugin {
         call,
         () -> {
           avatars.delete(avatarId(call));
+          return null;
+        });
+  }
+
+  private String imageOwner(PluginCall call) {
+    String owner = call.getString("characterId");
+    if (owner == null || !AVATAR_ID.matcher(owner).matches())
+      throw new IllegalArgumentException("角色标识无效");
+    return owner;
+  }
+
+  @PluginMethod
+  public void pickChatImage(PluginCall call) {
+    final String owner;
+    try {
+      if (call.getData().length() != 1) throw new IllegalArgumentException();
+      owner = imageOwner(call);
+    } catch (Exception error) {
+      fail(call, safeError(error));
+      return;
+    }
+    getActivity()
+        .runOnUiThread(
+            () -> {
+              if (pickerBusy || destroyed) {
+                fail(call, "请先完成当前文件操作。");
+                return;
+              }
+              pendingChatImageOwner = owner;
+              pendingChatImageGeneration = chatImages.generation(owner);
+              Intent intent =
+                  new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                      .addCategory(Intent.CATEGORY_OPENABLE)
+                      .setType("image/*")
+                      .putExtra(
+                          Intent.EXTRA_MIME_TYPES,
+                          new String[] {"image/png", "image/jpeg", "image/webp"});
+              launchPicker(call, intent, "chatImageResult");
+            });
+  }
+
+  @ActivityCallback
+  private void chatImageResult(PluginCall call, ActivityResult result) {
+    final String owner = pendingChatImageOwner;
+    final long generation = pendingChatImageGeneration;
+    pickerBusy = false;
+    pendingPickerCall = null;
+    pendingChatImageOwner = null;
+    if (call == null || destroyed) return;
+    if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
+      ok(call, null);
+      return;
+    }
+    Uri uri = result.getData().getData();
+    run(
+        call,
+        () -> {
+          if (owner == null
+              || !owner.equals(imageOwner(call))
+              || generation != chatImages.generation(owner))
+            throw new IllegalArgumentException("聊天已清空，请重新选择图片。");
+          if (owner.startsWith("card-")) data.rawCard(owner);
+          byte[] source = readImport(uri, MAX_AVATAR_BYTES);
+          if (generation != chatImages.generation(owner))
+            throw new IllegalArgumentException("聊天已清空，请重新选择图片。");
+          return chatImages.importImage(owner, source);
+        });
+  }
+
+  @PluginMethod
+  public void chatImagePreview(PluginCall call) {
+    run(
+        call,
+        () -> {
+          if (call.getData().length() != 2) throw new IllegalArgumentException();
+          return chatImages.preview(imageOwner(call), required(call, "imageId"));
+        });
+  }
+
+  @PluginMethod
+  public void discardChatImage(PluginCall call) {
+    run(
+        call,
+        () -> {
+          if (call.getData().length() != 2) throw new IllegalArgumentException();
+          chatImages.discardDraft(imageOwner(call), required(call, "imageId"));
           return null;
         });
   }
@@ -562,10 +716,12 @@ public class QibanPlugin extends Plugin {
     chats.execute(
         () -> {
           try {
-            ok(
-                call,
-                connection.chat(
-                    call.getObject("request"), call.getObject("persona"), required(call, "id")));
+            JSONObject request = call.getObject("request");
+            String owner = request == null ? null : request.optString("characterId", null);
+            if (owner == null || !AVATAR_ID.matcher(owner).matches())
+              throw new IllegalArgumentException("角色标识无效");
+            if (owner.startsWith("card-")) data.rawCard(owner);
+            ok(call, connection.chat(request, call.getObject("persona"), required(call, "id")));
           } catch (Exception e) {
             fail(call, safeError(e));
           }
@@ -592,6 +748,7 @@ public class QibanPlugin extends Plugin {
     keyDialogBusy = false;
     if (pendingPickerCall != null) ok(pendingPickerCall, null);
     pendingPickerCall = null;
+    pendingChatImageOwner = null;
     pendingExport = null;
     pickerBusy = false;
     synchronized (openImports) {

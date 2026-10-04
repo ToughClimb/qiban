@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import type {
   DesktopBridge,
   ConnectionStatus,
+  ChatReply,
   Result,
 } from "../../shared/desktop";
 import {
@@ -17,6 +18,12 @@ import {
 } from "../../shared/cards";
 import { parseCharacterCard } from "../../shared/character-card";
 import type { Conversations } from "../../shared/history";
+import {
+  CHAT_IMAGE_ID,
+  isChatImageAttachment,
+  type ChatImageDraft,
+} from "../../shared/image-chat";
+import { prepareChatContext } from "../../shared/chat";
 import { personalities } from "../../server/personas";
 
 type NativeCards = {
@@ -27,6 +34,12 @@ type NativeCards = {
 export type AndroidBridge = DesktopBridge & {
   importAvatar(id: string): Promise<Result<string | null>>;
   deleteAvatar(id: string): Promise<Result<void>>;
+  pickChatImage(characterId: string): Promise<Result<ChatImageDraft | null>>;
+  chatImagePreview(
+    characterId: string,
+    imageId: string,
+  ): Promise<Result<string | null>>;
+  discardChatImage(characterId: string, imageId: string): Promise<Result<void>>;
 };
 export interface AndroidPlugin {
   status(): Promise<Result<ConnectionStatus>>;
@@ -47,6 +60,17 @@ export interface AndroidPlugin {
   openCards(): Promise<Result<void>>;
   importAvatar(input: { id: string }): Promise<Result<string | null>>;
   deleteAvatar(input: { id: string }): Promise<Result<void>>;
+  pickChatImage(input: {
+    characterId: string;
+  }): Promise<Result<ChatImageDraft | null>>;
+  chatImagePreview(input: {
+    characterId: string;
+    imageId: string;
+  }): Promise<Result<string | null>>;
+  discardChatImage(input: {
+    characterId: string;
+    imageId: string;
+  }): Promise<Result<void>>;
   loadHistory(): Promise<Result<Conversations>>;
   saveHistory(input: { history: Conversations }): Promise<Result<void>>;
   dataPath(): Promise<Result<string>>;
@@ -55,7 +79,7 @@ export interface AndroidPlugin {
     request: ChatRequest;
     persona: CardFields;
     id: string;
-  }): Promise<Result<{ content: string; mode: "demo" | "live" }>>;
+  }): Promise<Result<ChatReply>>;
   cancel(input: { id: string }): Promise<Result<void>>;
 }
 declare global {
@@ -71,6 +95,12 @@ const validAvatarUrl = (value: unknown): value is string =>
   typeof value === "string" &&
   value.length <= 1_400_000 &&
   /^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(value);
+const validImageUrl = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value.length <= 1_400_000 &&
+  /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
+const validOwner = (id: string) =>
+  Boolean(getCharacter(id)) || customId.test(id);
 const sourceNames: Record<keyof CardFields, string> = {
   name: "name",
   description: "description",
@@ -256,6 +286,34 @@ export function createAndroidBridge(native: AndroidPlugin): AndroidBridge {
       getCharacter(id) || customId.test(id)
         ? native.deleteAvatar({ id })
         : Promise.resolve(failure("角色标识无效。")),
+    async pickChatImage(characterId) {
+      if (!validOwner(characterId)) return failure("角色标识无效。");
+      const result = await native.pickChatImage({ characterId });
+      if (!result.ok || result.value === null) return result;
+      const draft = result.value;
+      if (
+        !draft ||
+        Object.keys(draft).length !== 2 ||
+        !isChatImageAttachment(draft.image) ||
+        !validImageUrl(draft.previewUrl) ||
+        !draft.previewUrl.startsWith(`data:${draft.image.mimeType};base64,`)
+      )
+        return failure("图片格式不符合本版要求。");
+      return result;
+    },
+    async chatImagePreview(characterId, imageId) {
+      if (!validOwner(characterId) || !CHAT_IMAGE_ID.test(imageId))
+        return failure("图片标识无效。");
+      const result = await native.chatImagePreview({ characterId, imageId });
+      if (!result.ok || result.value === null) return result;
+      return validImageUrl(result.value)
+        ? result
+        : failure("图片格式不符合本版要求。");
+    },
+    discardChatImage: (characterId, imageId) =>
+      validOwner(characterId) && CHAT_IMAGE_ID.test(imageId)
+        ? native.discardChatImage({ characterId, imageId })
+        : Promise.resolve(failure("图片标识无效。")),
     loadHistory: () => native.loadHistory(),
     saveHistory: (history) => native.saveHistory({ history }),
     dataPath: () => native.dataPath(),
@@ -279,9 +337,47 @@ export function createAndroidBridge(native: AndroidPlugin): AndroidBridge {
       return native.deleteData();
     },
     async chat(request, id) {
+      let prepared;
+      try {
+        prepared = prepareChatContext(request);
+      } catch {
+        return failure("图片或消息格式不正确，请编辑后重试。");
+      }
       const result = await fields(request.characterId);
       if (!result.ok) return result;
-      return native.chat({ request, persona: result.value, id });
+      const reply = await native.chat({
+        request: prepared.request,
+        persona: result.value,
+        id,
+      });
+      if (!reply.ok) return reply;
+      const reported = reply.value.omittedImageIds ?? [];
+      const originalIds = new Set(
+        request.messages.flatMap((message) =>
+          message.image ? [message.image.id] : [],
+        ),
+      );
+      if (
+        !Array.isArray(reported) ||
+        reported.length > 40 ||
+        reported.some(
+          (imageId) =>
+            typeof imageId !== "string" ||
+            !CHAT_IMAGE_ID.test(imageId) ||
+            !originalIds.has(imageId),
+        )
+      )
+        return failure("图片回复格式不正确，请重试。");
+      const omittedImageIds = [
+        ...new Set([...prepared.omittedImageIds, ...reported]),
+      ];
+      return {
+        ok: true,
+        value: {
+          ...reply.value,
+          ...(omittedImageIds.length ? { omittedImageIds } : {}),
+        },
+      };
     },
     cancel(id) {
       void native.cancel({ id }).catch(() => {});

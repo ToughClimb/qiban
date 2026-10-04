@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Test APK only: one generated pixel, with no filesystem or network interface. -->
+        <provider
+            android:name="app.qiban.mobile.SyntheticImageProvider"
+            android:authorities="app.qiban.mobile.test.images"
+            android:exported="true" />
+    </application>
+</manifest>

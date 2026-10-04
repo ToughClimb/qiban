@@ -125,7 +125,7 @@ public final class DataStore {
   }
 
   private static void remove(File file) throws IOException {
-    if (file.exists() && !file.delete()) throw new IOException();
+    if (!file.delete() && file.exists()) throw new IOException();
   }
 
   public synchronized JSONObject listCards() {
@@ -278,14 +278,20 @@ public final class DataStore {
           JSONObject message = (JSONObject) item;
           Iterator<String> fields = message.keys();
           while (fields.hasNext())
-            if (!Arrays.asList("id", "role", "content", "mode").contains(fields.next()))
+            if (!Arrays.asList("id", "role", "content", "mode", "image").contains(fields.next()))
               throw error("聊天记录字段无效");
           if (!(message.opt("id") instanceof String)
               || bytes(message.getString("id")) > 256
               || !((i % 2 == 0) ? "user" : "assistant").equals(message.opt("role"))
               || !(message.opt("content") instanceof String)) throw error("聊天记录格式无效");
+          if (message.has("image")) {
+            if (i % 2 != 0 || !(message.opt("image") instanceof JSONObject))
+              throw error("聊天图片引用格式无效");
+            ChatImageStore.validateAttachment(message.getJSONObject("image"));
+          }
           String content = message.getString("content");
-          if (content.isEmpty() || content.length() > 8000) throw error("聊天内容长度无效");
+          if ((content.isEmpty() && !message.has("image")) || content.length() > 8000)
+            throw error("聊天内容长度无效");
           if (message.has("mode")
               && (i % 2 == 0 || !Arrays.asList("demo", "live").contains(message.opt("mode"))))
             throw error("聊天模式无效");
@@ -366,7 +372,7 @@ public final class DataStore {
   }
 
   private static void inspectHistory(JsonReader reader, int depth, int[] nodes) throws IOException {
-    if (depth > 3 || ++nodes[0] > 100101) throw error("聊天记录结构无效");
+    if (depth > 4 || ++nodes[0] > 200101) throw error("聊天记录结构无效");
     switch (reader.peek()) {
       case BEGIN_OBJECT:
         reader.beginObject();
@@ -389,6 +395,9 @@ public final class DataStore {
         break;
       case STRING:
         if (reader.nextString().length() > 8000) throw error("聊天内容长度无效");
+        break;
+      case NUMBER:
+        reader.nextString();
         break;
       default:
         throw error("聊天记录格式无效");

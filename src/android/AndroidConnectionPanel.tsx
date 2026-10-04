@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import { AppearancePanel } from "../AppearancePanel";
+import { applyAccent, storedAccent } from "../appearance";
 import { DEFAULT_API_URL, type ConnectionStatus } from "../../shared/desktop";
 import type { Mode } from "../../shared/characters";
 
@@ -18,6 +26,7 @@ export function AndroidConnectionPanel({
   const [replaceKey, setReplaceKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useLayoutEffect(() => applyAccent(storedAccent()), []);
   function apply(value: ConnectionStatus) {
     setStatus(value);
     setBaseUrl(value.baseUrl);
@@ -244,6 +253,7 @@ export function AndroidConnectionPanel({
             </button>
           </div>
         </form>
+        <AppearancePanel disabled={busy} />
         <details className="local-data">
           <summary>本机数据与备份</summary>
           <p>

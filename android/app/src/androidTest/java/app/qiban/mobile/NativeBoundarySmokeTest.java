@@ -18,8 +18,7 @@ import org.junit.runner.RunWith;
 /** Test APK only: exercises the real runtime bridge without enabling WebView debugging. */
 @RunWith(AndroidJUnit4.class)
 public class NativeBoundarySmokeTest {
-  private static String evaluate(ActivityScenario<MainActivity> scenario, String script)
-      throws Exception {
+  static String evaluate(ActivityScenario<MainActivity> scenario, String script) throws Exception {
     String[] value = new String[1];
     CountDownLatch result = new CountDownLatch(1);
     scenario.onActivity(
@@ -40,14 +39,7 @@ public class NativeBoundarySmokeTest {
   @Test
   public void realBridgeDeniesGenericCapabilitiesAndPrivateImageRoute() throws Exception {
     try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-      for (int attempt = 0; attempt < 100; attempt++) {
-        if (evaluate(scenario, "String(!!(window.Capacitor && window.Capacitor.nativePromise))")
-            .equals("true")) break;
-        Thread.sleep(100);
-      }
-      assertEquals(
-          "true",
-          evaluate(scenario, "String(!!(window.Capacitor && window.Capacitor.nativePromise))"));
+      awaitBridge(scenario);
       scenario.onActivity(
           activity -> {
             assertEquals(
@@ -122,7 +114,16 @@ public class NativeBoundarySmokeTest {
     }
   }
 
-  private static String settled(ActivityScenario<MainActivity> scenario) throws Exception {
+  static void awaitBridge(ActivityScenario<MainActivity> scenario) throws Exception {
+    for (int attempt = 0; attempt < 100; attempt++) {
+      if (evaluate(scenario, "String(!!(window.Capacitor && window.Capacitor.nativePromise))")
+          .equals("true")) return;
+      Thread.sleep(100);
+    }
+    fail("Native bridge did not initialize");
+  }
+
+  static String settled(ActivityScenario<MainActivity> scenario) throws Exception {
     for (int attempt = 0; attempt < 100; attempt++) {
       String result = evaluate(scenario, "String(window.__qibanBoundary)");
       if (!result.equals("pending")) return result;
