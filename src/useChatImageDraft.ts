@@ -4,6 +4,7 @@ import { desktopBridge } from "./api";
 import { safeChatImagePreview } from "./chatImagePreview";
 
 type OwnedDraft = ChatImageDraft & { characterId: string; discardable: boolean };
+const MISSING_IMAGE_NOTICE = "原图片无法读取，已从编辑草稿移除。可以发送文字或重新选图。";
 export function useChatImageDraft(characterId: string) {
   const [draft, setDraft] = useState<OwnedDraft | null>(null);
   const [picking, setPicking] = useState(false);
@@ -82,21 +83,25 @@ export function useChatImageDraft(characterId: string) {
       if (token === epoch.current && mounted.current) setPicking(false);
     }
   }
-  async function restore(image: ChatImageAttachment): Promise<boolean> {
+  async function restore(image: ChatImageAttachment): Promise<"restored" | "missing" | "cancelled"> {
     const token = ++epoch.current;
     setPicking(true); setError("");
     try {
       const result = await desktopBridge()?.chatImagePreview?.(characterId, image.id);
-      if (token !== epoch.current || characterId !== currentCharacter.current || !mounted.current) return false;
+      if (token !== epoch.current || characterId !== currentCharacter.current || !mounted.current) return "cancelled";
       const url = result?.ok ? safeChatImagePreview(result.value) : null;
-      if (!url) throw Error("图片无法重新读取，可以先重试这条消息。");
+      if (!url) {
+        setError(MISSING_IMAGE_NOTICE);
+        return "missing";
+      }
       // Keep the pending history reference until Send; this is not a new local file.
       staged.current = { characterId, image, previewUrl: url, discardable: false };
       setDraft(staged.current);
-      return true;
+      return "restored";
     } catch {
-      if (token === epoch.current && mounted.current) setError("图片无法重新读取，可以先重试这条消息。");
-      return false;
+      if (token !== epoch.current || characterId !== currentCharacter.current || !mounted.current) return "cancelled";
+      setError(MISSING_IMAGE_NOTICE);
+      return "missing";
     } finally {
       if (token === epoch.current && mounted.current) setPicking(false);
     }
