@@ -1,0 +1,91 @@
+name: Android checks
+on:
+  workflow_dispatch:
+    inputs:
+      emulator_smoke:
+        description: Run API35 emulator installation and native demo smoke
+        type: boolean
+        default: true
+  push:
+    branches: [feat/android]
+  pull_request:
+    paths:
+      [
+        "android/**",
+        "src/**",
+        "shared/**",
+        "capacitor.config.ts",
+        "package*.json",
+        ".github/workflows/android.yml",
+      ]
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install Android SDK packages
+        run: |
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$RUNNER_TEMP/qiban-android-sdk}}"
+          if [ ! -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager" ]; then
+            sdk_root="$RUNNER_TEMP/qiban-android-sdk"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$RUNNER_TEMP/qiban-android-tools.zip"
+            echo "5fdcc763663eefb86a5b8879697aa6088b041e70  $RUNNER_TEMP/qiban-android-tools.zip" | sha1sum --check
+            mkdir -p "$sdk_root/cmdline-tools"
+            unzip -q "$RUNNER_TEMP/qiban-android-tools.zip" -d "$sdk_root/cmdline-tools"
+            mv "$sdk_root/cmdline-tools/cmdline-tools" "$sdk_root/cmdline-tools/latest"
+          fi
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          # sdkmanager may close stdin after reading licenses; preserve its exit status.
+          set +o pipefail
+          yes | "$sdkmanager" --sdk_root="$sdk_root" --licenses > /dev/null
+          set -o pipefail
+          "$sdkmanager" --sdk_root="$sdk_root" "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0"
+      - run: npm ci
+      - run: npm test
+      - run: npm run android:sync
+      - run: npm run android:test
+      - run: npm run android:unsigned
+      - name: Build local test APK
+        run: npm run android:debug
+      - name: Record APK hashes
+        run: sha256sum android/app/build/outputs/apk/{debug/app-debug.apk,release/app-release-unsigned.apk}
+      - name: Record public test certificate
+        run: '"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk'
+      - name: Check emulator acceleration
+        id: kvm
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.emulator_smoke)
+        run: |
+          if [ -c /dev/kvm ]; then
+            sudo chmod a+rw /dev/kvm
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "SKIP emulator smoke: this runner has no KVM device; no emulator acceptance claimed."
+          fi
+      - name: API35 installation and native demo smoke
+        if: steps.kvm.outputs.available == 'true'
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0 commit
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest
+            node android/tools/emulator-smoke.mjs
+      # No APK/key upload or publication. Debug identity is disposable and cannot establish release upgrade compatibility.
