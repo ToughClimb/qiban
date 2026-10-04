@@ -198,21 +198,55 @@ try {
   await command(join(installRoot, "Update.exe"), ["--uninstall", "--silent"]);
   installed = false;
   // Squirrel may finish before its app hook / executable cleanup has exited.
-  await expect
-    .poll(() => exists(dataRoot), {
-      timeout: 15_000,
-      message: "Uninstall hook must remove synthetic user data",
-    })
-    .toBe(false);
-  await expect
-    .poll(
-      () => exists(join(installRoot, `app-${upgradeVersion}`, "Qiban.exe")),
-      {
+  try {
+    await expect
+      .poll(() => exists(dataRoot), {
         timeout: 15_000,
-        message: "Uninstaller must remove installed application",
-      },
-    )
-    .toBe(false);
+        message: "Uninstall hook must remove synthetic user data",
+      })
+      .toBe(false);
+    await expect
+      .poll(
+        () => exists(join(installRoot, `app-${upgradeVersion}`, "Qiban.exe")),
+        {
+          timeout: 15_000,
+          message: "Uninstaller must remove installed application",
+        },
+      )
+      .toBe(false);
+  } catch (error) {
+    const sensitive = await Promise.all(
+      ["history.json", "connection.json", "cards"].map(async (name) => ({
+        category: name,
+        present: await exists(join(dataRoot, name)),
+      })),
+    );
+    let hooks = { uninstall_hook: 0, hook_failure: 0 };
+    try {
+      const log = await readFile(
+        join(process.env.LOCALAPPDATA, "SquirrelTemp", "SquirrelSetup.log"),
+        "utf8",
+      );
+      hooks = {
+        uninstall_hook: (log.match(/--squirrel-uninstall/g) || []).length,
+        hook_failure: (log.match(/Failed to run pre-uninstall hooks/g) || [])
+          .length,
+      };
+    } catch {}
+    console.log(
+      JSON.stringify({
+        uninstall_diagnostics: {
+          data_directory: await exists(dataRoot),
+          sensitive,
+          installed_executable: await exists(
+            join(installRoot, `app-${upgradeVersion}`, "Qiban.exe"),
+          ),
+          hooks,
+        },
+      }),
+    );
+    throw error;
+  }
   console.log(
     "PASS uninstall: installed executable, synthetic conversations, roles and encrypted connection data removed.",
   );
