@@ -1,6 +1,8 @@
 import type { CardStore } from "./cards.js";
 import { createProvider } from "../server/provider.js";
-import { modelRequest, finalText, LIVE_MODEL } from "../server/model.js";
+import { modelRequest, prepareImageModelRequest, finalText, LIVE_MODEL } from "../server/model.js";
+import type { ChatImageResolver } from "../server/image-chat.js";
+import { prepareChatContext } from "../shared/chat.js";
 import { parseChat } from "../server/validation.js";
 import type { ChatRequest } from "../shared/characters.js";
 import {
@@ -23,12 +25,14 @@ const validModel = (value: unknown): value is string =>
 export class DesktopService {
   private connection: SavedConnection;
   private active = new Map<string, AbortController>();
+  private activeCharacter?: string;
   private configuring = false;
   private setupAbort?: AbortController;
   constructor(
     private store: ConnectionStore,
     private transport: JsonTransport = requestJson,
     private cards?: CardStore,
+    private resolveImage?: ChatImageResolver,
   ) {
     this.connection = store.load();
   }
@@ -177,10 +181,16 @@ export class DesktopService {
     this.setupAbort?.abort();
     for (const controller of this.active.values()) controller.abort();
   }
+  cancelCharacter(characterId: string) {
+    if (this.activeCharacter === characterId) this.cancelAll();
+  }
   async chat(value: ChatRequest, id: string) {
+    let prepared;
+    try { prepared = prepareChatContext(value); } catch { /* validated below */ }
     const request = parseChat(
-      value,
+      prepared?.request,
       this.cards ? (id) => this.cards!.has(id) : undefined,
+      { allowImages: true },
     );
     if (!request || typeof id !== "string" || !/^[a-z0-9-]{1,64}$/i.test(id))
       throw new ConnectionError(
@@ -190,6 +200,10 @@ export class DesktopService {
     if (this.active.size || this.configuring)
       throw new ConnectionError("busy", "正在等待回复，请稍等。");
     const mode = this.status().mode;
+    const hasImages = request.messages.some(message => message.image || message.imageOmitted);
+    const deepseek = normalizeEndpoint(this.connection.baseUrl).hostname === "api.deepseek.com" || /^deepseek[-/]/i.test(this.connection.model);
+    if (hasImages && (mode !== "live" || !deepseek || this.connection.model !== LIVE_MODEL || !this.resolveImage))
+      throw new ConnectionError("image", "图片聊天需要连接支持图片的 deepseek-flash 模型，请先检查连接设置。");
     if (mode === "demo")
       return {
         content: await createProvider({ mode: "demo" }).reply(request),
@@ -197,12 +211,18 @@ export class DesktopService {
       };
     const controller = new AbortController();
     this.active.set(id, controller);
+    this.activeCharacter = request.characterId;
     const { key, baseUrl, model } = this.connection;
     try {
       const endpoint = normalizeEndpoint(baseUrl);
       let body;
+      let omittedImageIds = prepared!.omittedImageIds;
       try {
-        body = modelRequest(
+        if (hasImages) {
+          const imageRequest = await prepareImageModelRequest(value, model, deepseek, this.cards?.persona(request.characterId), this.resolveImage, controller.signal);
+          body = imageRequest.body;
+          omittedImageIds = imageRequest.omittedImageIds;
+        } else body = modelRequest(
           request,
           model,
           endpoint.hostname === "api.deepseek.com" ||
@@ -210,11 +230,14 @@ export class DesktopService {
           this.cards?.persona(request.characterId),
         );
       } catch {
+        if (controller.signal.aborted) throw new ConnectionError("cancelled", "已取消这次连接。");
+        if (hasImages) throw new ConnectionError("image", "图片或角色设定无法用于这次请求，请重新选择图片或缩短消息后重试。");
         throw new ConnectionError(
           "context",
           "角色设定与消息过长，请缩短角色设定或编辑这条消息后重试。",
         );
       }
+      controller.signal.throwIfAborted();
       const data = await this.transport(
         new URL("chat/completions", endpoint),
         key!,
@@ -232,9 +255,10 @@ export class DesktopService {
           "服务没有返回可读的聊天回复，请检查服务设置后重试。",
         );
       }
-      return { content, mode };
+      return { content, mode, ...(omittedImageIds.length ? { omittedImageIds } : {}) };
     } finally {
       this.active.delete(id);
+      this.activeCharacter = undefined;
     }
   }
 }
