@@ -24,6 +24,15 @@ jobs:
         env:
           CHROMIUM_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
       - run: npm run desktop:make
+      - name: Composer and avatar UI regressions
+        shell: pwsh
+        run: |
+          node tests/composer-focus-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/avatar-ui-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        env:
+          CHROMIUM_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
       - name: Native production HTTPS reachability (unpaid)
         run: node --import tsx tests/native-provider-reachability.ts
         timeout-minutes: 1

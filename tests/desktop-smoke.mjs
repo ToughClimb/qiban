@@ -190,6 +190,18 @@ try {
   const restoredAvatars = await page.evaluate(() => window.qiban.cards());
   expect(restoredAvatars.value.characters.find((character) => character.id === "lin").avatarUrl).toBe(avatarUrl);
   expect(restoredAvatars.value.characters.find((character) => character.id === customId).avatarUrl).toContain(customId);
+  await application.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+  }, avatarFiles[0]);
+  await page.getByRole("button", { name: "管理角色" }).click();
+  await page.getByRole("button", { name: "更换林野的头像" }).click();
+  const shownAvatar = page.locator(".chat-header .avatar.small img");
+  await expect(shownAvatar).toHaveAttribute("src", /^qiban:\/\/app\/avatars\/lin\/[0-9a-f]{64}\.png$/);
+  expect(await shownAvatar.evaluate(async (image) => { await image.decode(); return image.naturalWidth; })).toBe(512);
+  await page.getByRole("button", { name: "恢复默认", exact: true }).click();
+  await expect(shownAvatar).toHaveAttribute("src", /characters\/lin\.svg$/);
+  await page.getByRole("button", { name: "关闭角色管理" }).click();
+  console.log("PASS integrated native avatar UI: actual picker, app-owned image render and restore-default control");
   const fixturePath = join(directory, "import-fixture.json");
   const fixtureSource = JSON.stringify({
     name: "Import fixture",
