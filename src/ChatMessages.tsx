@@ -1,10 +1,11 @@
 import { Avatar } from "./Avatar";
 import type { RefObject } from "react";
-import type { Character, Message } from "../shared/characters";
+import type { Character, Message, Mode } from "../shared/characters";
 
 type Props = {
   character: Character;
   messages: Message[];
+  mode: Mode | null;
   busy: boolean;
   error: string;
   retryDisabled: boolean;
@@ -15,6 +16,7 @@ type Props = {
 export function ChatMessages({
   character,
   messages,
+  mode,
   busy,
   error,
   retryDisabled,
@@ -31,30 +33,38 @@ export function ChatMessages({
       aria-live="polite"
       aria-relevant="additions text"
     >
-      <div className="welcome">
-        <Avatar character={character} size="hero" />
-        <h3>和{character.name}，聊聊日常</h3>
-        <p>{character.description}</p>
-        <span className="welcome-label">{character.kind}</span>
-      </div>
+      {!messages.length ? (
+        <div className="welcome">
+          <div className="welcome-portrait">
+            <Avatar character={character} size="hero" />
+          </div>
+        </div>
+      ) : null}
       <div className="message assistant">
         <Avatar character={character} size="tiny" />
         <div>
-          <span className="message-name">{character.name}</span>
           <p className="bubble">{character.greeting}</p>
         </div>
       </div>
       {messages.map((message) => (
-        <div key={message.id} className={`message ${message.role}`}>
+        <div
+          key={message.id}
+          className={`message ${message.role}`}
+          data-mode={message.mode}
+        >
           {message.role === "assistant" && (
             <Avatar character={character} size="tiny" />
           )}
           <div>
-            <span className="message-name">
-              {message.role === "user"
-                ? "你"
-                : `${character.name} · ${message.mode === "demo" ? "演示回复" : message.mode === "live" ? "AI 回复" : "历史回复"}`}
-            </span>
+            {message.role === "assistant" && message.mode !== mode && (
+              <span className="message-name">
+                {message.mode === "demo"
+                  ? "演示示例"
+                  : message.mode === "live"
+                    ? "AI 回复"
+                    : "历史回复"}
+              </span>
+            )}
             <p className="bubble">{message.content}</p>
           </div>
         </div>
