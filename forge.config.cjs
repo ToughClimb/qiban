@@ -16,7 +16,11 @@ module.exports = {
     {
       name: "@electron-forge/maker-squirrel",
       platforms: ["win32"],
-      config: { name: "qiban", setupExe: "Qiban-Setup.exe", noMsi: true },
+      config: {
+        name: "qiban", setupExe: "Qiban-Setup.exe", noMsi: true,
+        // Squirrel's default NuGet template includes LICENSE but omits HTML notices.
+        additionalFiles: [{ src: "LICENSES.chromium.html", target: "lib\\net45\\LICENSES.chromium.html" }],
+      },
     },
     { name: "@electron-forge/maker-zip", platforms: ["win32"], config: {} },
   ],

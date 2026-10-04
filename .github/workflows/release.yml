@@ -55,6 +55,8 @@ jobs:
       - name: Embed reviewed build identity
         run: node scripts/release-packages.mjs stamp windows
       - run: npx --no-install electron-forge make --platform=win32 --arch=x64
+      - name: Verify ZIP and installer licenses
+        run: node scripts/check-windows-licenses.mjs
       - name: Connection, focus, avatar, theme and image UI regressions
         shell: pwsh
         run: |

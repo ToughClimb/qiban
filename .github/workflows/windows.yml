@@ -19,13 +19,15 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Reviewed release policy
-        run: node --test scripts/release-policy.test.mjs
+        run: node --test scripts/release-policy.test.mjs scripts/release-archives.test.mjs
       - run: npm run build
       - name: Connection setup regressions
         run: node tests/connection-panel-smoke.mjs
         env:
           CHROMIUM_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
       - run: npm run desktop:make
+      - name: Verify ZIP and installer licenses
+        run: node scripts/check-windows-licenses.mjs
       - name: Composer and avatar UI regressions
         shell: pwsh
         run: |

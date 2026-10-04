@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFile, writeFile, mkdir, readdir, copyFile, lstat } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { ASSET_NAMES, releaseIdentity, verifyManifest } from "./release-policy.mjs";
+import { forbiddenArchiveEntry as forbidden, verifyArchiveContents as zipMatches } from "./release-archives.mjs";
 const require = createRequire(import.meta.url);
 const identity = releaseIdentity(process.env);
 const runId = process.env.GITHUB_RUN_ID;
@@ -21,44 +22,6 @@ if (command === "stamp") {
   const directory = resolve("release-assets", platform);
   await mkdir(directory, { recursive: true });
   const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
-  const forbidden = name => /(^|\/)\.env(?:\.|$)|(^|\/)(?:history\.json|connection\.json|debug\.keystore|[^/]+\.(?:pem|p12|pfx|jks))$|(^|\/)(?:\.git|tests|test-data|userData|avatars|chat-images)\//i.test(name);
-  async function zipMatches(file, expected) {
-    const yauzl = require("yauzl");
-    const found = new Set();
-    let count = 0;
-    await new Promise((done, fail) => yauzl.open(file, { lazyEntries: true }, (error, archive) => {
-      if (error) return fail(error);
-      const abort = error => { archive.close(); fail(error); };
-      archive.on("error", abort);
-      archive.on("end", done);
-      archive.on("entry", entry => {
-        if (++count > 10000 || forbidden(entry.fileName) || /(^|\/)\.\.(\/|$)|\\/.test(entry.fileName))
-          return abort(new Error("Unexpected private/path entry in release archive."));
-        const key = [...expected.keys()].find(name => entry.fileName === name || entry.fileName.endsWith(`/${name}`));
-        if (!key) return archive.readEntry();
-        if (found.has(key) || entry.uncompressedSize > 32 * 1024 * 1024)
-          return abort(new Error("Duplicate or excessive package verification entry."));
-        found.add(key);
-        archive.openReadStream(entry, (error, stream) => {
-          if (error) return abort(error);
-          const chunks = []; let size = 0;
-          stream.on("error", abort);
-          stream.on("data", chunk => {
-            size += chunk.length;
-            if (size > 32 * 1024 * 1024) { stream.destroy(); abort(new Error("Package entry exceeds limit.")); }
-            else chunks.push(chunk);
-          });
-          stream.on("end", () => {
-            if (sha256(Buffer.concat(chunks)) !== sha256(expected.get(key)))
-              return abort(new Error(`Packaged bytes differ from verified source: ${key}`));
-            archive.readEntry();
-          });
-        });
-      });
-      archive.readEntry();
-    }));
-    if (found.size !== expected.size) throw new Error("Required provenance/license/payload is missing from the package.");
-  }
   const source = {};
   if (platform === "windows") {
     const base = "out/Qiban-win32-x64";

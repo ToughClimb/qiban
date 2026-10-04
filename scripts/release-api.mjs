@@ -56,7 +56,7 @@ if (command === "preflight") {
     const jobs = await request(`/actions/runs/${run.id}/jobs`);
     if (!jobs?.jobs?.length || jobs.jobs.some(job => job.conclusion !== "success"))
       throw new Error("Required exact-SHA verification jobs did not pass.");
-    if (name === "Windows desktop verification" && ["Image chat UI regressions", "Native packaged image chat"].some(required =>
+    if (name === "Windows desktop verification" && ["Verify ZIP and installer licenses", "Image chat UI regressions", "Native packaged image chat"].some(required =>
       !jobs.jobs.some(job => job.steps.some(step => step.name === required && step.conclusion === "success"))))
       throw new Error("Exact-SHA image UI and actual packaged native image verification are required before release.");
     if (name === "Android checks" && !jobs.jobs.some(job => job.steps.some(step =>
