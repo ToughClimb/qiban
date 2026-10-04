@@ -54,9 +54,13 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    let updatedStatus: ConnectionStatus | undefined;
     try {
       const result =
-        status?.needsSelection && status.baseUrl === baseUrl && !key
+        status?.hasKey &&
+        status.baseUrl === baseUrl &&
+        !key &&
+        remember === status.remembered
           ? await bridge.selectModel(model)
           : await bridge.connect({ baseUrl, apiKey: key, remember });
       if (!result.ok) {
@@ -64,13 +68,31 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
         return;
       }
       setKey("");
-      setStatus(result.value);
-      setModel(result.value.model);
-      onChanged(result.value.mode);
-      if (!result.value.needsSelection) close();
+      updatedStatus = result.value;
+      setBaseUrl(updatedStatus.baseUrl);
+      setStatus(updatedStatus);
+      // Rediscovery can retain the old model. Apply a valid edit for the same
+      // canonical service; never carry a previous service's choice to a new one.
+      if (
+        status?.baseUrl === updatedStatus.baseUrl &&
+        model &&
+        model !== updatedStatus.model &&
+        (!updatedStatus.models.length || updatedStatus.models.includes(model))
+      ) {
+        const selection = await bridge.selectModel(model);
+        if (!selection.ok) {
+          setError(selection.error);
+          return;
+        }
+        updatedStatus = selection.value;
+      }
+      setStatus(updatedStatus);
+      setModel(updatedStatus.model);
+      if (!updatedStatus.needsSelection) close();
     } catch {
       setError("这次未能完成连接，请再试一次。");
     } finally {
+      if (updatedStatus) onChanged(updatedStatus.mode);
       setBusy(false);
     }
   }
@@ -143,12 +165,7 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
             autoComplete="off"
             value={baseUrl}
             maxLength={2048}
-            onChange={(event) => {
-              setBaseUrl(event.target.value);
-              setStatus((current) =>
-                current ? { ...current, needsSelection: false } : current,
-              );
-            }}
+            onChange={(event) => setBaseUrl(event.target.value)}
             disabled={busy}
             required
           />
@@ -179,7 +196,7 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
           <p className="field-note">
             默认只在本次打开期间使用。记住时会用系统加密保存；服务费用由服务方收取。
           </p>
-          {status?.needsSelection && (
+          {status?.hasKey && status.baseUrl === baseUrl && (
             <div className="model-selection">
               <label htmlFor="model-choice">
                 {status.models.length
@@ -191,6 +208,7 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
                   id="model-choice"
                   value={model}
                   onChange={(event) => setModel(event.target.value)}
+                  disabled={busy}
                   required
                 >
                   <option value="">请选择</option>
@@ -206,11 +224,14 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
                   value={model}
                   maxLength={128}
                   onChange={(event) => setModel(event.target.value)}
+                  disabled={busy}
                   required
                 />
               )}
               <p className="field-note">
-                这个服务没有唯一的默认模型，栖伴不会替你随意选择。
+                {status.needsSelection
+                  ? "这个服务没有唯一的默认模型，栖伴不会替你随意选择。"
+                  : "可以更换聊天模型，或修改手动填写的模型名称。"}
               </p>
             </div>
           )}
@@ -223,7 +244,10 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
             <button className="send-button" type="submit" disabled={busy}>
               {busy
                 ? "正在检查连接…"
-                : status?.needsSelection
+                : status?.hasKey &&
+                    status.baseUrl === baseUrl &&
+                    !key &&
+                    remember === status.remembered
                   ? "使用这个模型"
                   : "连接并开始聊天"}
             </button>
