@@ -1,40 +1,45 @@
 # Qiban visual review
 
-Branch: `feat/visual-redesign`. Verified starting head: `0eb6dcc0509445d5d0ed8420ca80588711517b4b` on `feat/qiban-mvp`.
+Branch: `feat/visual-redesign`. Starting feature head: `0eb6dcc0509445d5d0ed8420ca80588711517b4b`.
 
-## Direction
+## Current composition
 
-A quiet conversational space with a narrow companion rail, paper and ink contrast, local serif display typography, larger oval portraits, unboxed assistant messages, restrained navigation and a compact composer. The welcome portrait yields to the conversation after the first message. Existing original character art is reused; the small botanical footer is an original inline SVG. There are no new dependencies, remote fonts, analytics or paid image calls.
+The companion rail contains avatars and names. The chat contains the character name, conversation, compact composer and necessary controls. Introductory slogans, repeated descriptions, greeting labels, ordinary per-message names, topic suggestions and routine footer instructions were deleted. One concise disclosure identifies the virtual/demo mode; historical replies whose source differs from the current mode retain a source label. Saved message provenance is unchanged.
 
-Application state, message handling, connection handlers, provider behavior, character-card schemas and native code are unchanged. Virtual-character identity remains in the chat header; demo disclosure remains above the conversation, and individual reply provenance remains in saved message labels.
+The composer is 74px high on desktop and 76px on mobile. First launch offers the demo immediately, with optional AI-service fields behind a native keyboard-accessible disclosure. Existing configured services open expanded. API, key, model and connection handlers are preserved.
 
-## Rendered evidence
+Avatar controls appear in character management only when the optional platform bridge supports them. `CardPanel.onChangeAvatar(id)` and `onResetAvatar(id)` call the app callbacks; native picker/storage remains outside this branch. Cancellation (`null`) does not report an error or reload the character list. Successful import/reset refreshes the portraits. Only same-character, hashed `qiban://app/avatars/...png` URLs and image data URLs are accepted; remote URLs and failed images use built-in art.
 
-These are actual Chromium captures of the production renderer at **1280×800** and **390×844**. A synthetic in-memory desktop bridge exposes the existing desktop settings and character controls; all data and replies are synthetic. They demonstrate renderer presentation, not native Windows installation or Android-device acceptance. The welcome captures show the fresh conversation canvas after dismissing setup; settings captures show the same setup modal used on first launch.
+The only dependency imported from platform work is the approved two-file avatar type contract, cherry-picked from `faa19c3a6493057373ca294eb0220ef3a5395439`. No desktop, Android, provider, manifest or bootstrap implementation was merged. Existing original art remains unchanged; no dependencies, remote fonts, analytics or paid images were added.
 
-| View | Before | After |
+## Actual rendered evidence
+
+These are Chromium captures of the production renderer at **1280×800** and **390×844**, using a synthetic in-memory desktop bridge. No private content, credentials or private paths appear. They demonstrate renderer presentation, not native Windows/Android acceptance.
+
+**Onboarding** means the modal automatically shown on a fresh launch before any dismissal. **Empty chat** means the demo conversation canvas after choosing demo. Connection settings show the optional service disclosure expanded. These views are named separately.
+
+| View | Before | Current |
 | --- | --- | --- |
-| Desktop welcome | [Before](visual-before-desktop-firstlaunch.png) | [After](visual-after-desktop-firstlaunch.png) |
-| Desktop chat | [Before](visual-before-desktop-chat.png) | [After](visual-after-desktop-chat.png) |
-| Desktop settings | [Before](visual-before-desktop-settings.png) | [After](visual-after-desktop-settings.png) |
-| Mobile welcome | [Before](visual-before-mobile-firstlaunch.png) | [After](visual-after-mobile-firstlaunch.png) |
-| Mobile chat | [Before](visual-before-mobile-chat.png) | [After](visual-after-mobile-chat.png) |
-| Mobile settings | [Before](visual-before-mobile-settings.png) | [After](visual-after-mobile-settings.png) |
+| Desktop first-launch onboarding | [Before](visual-before-desktop-onboarding.png) | [Current](visual-after-desktop-onboarding.png) |
+| Desktop empty chat | [Before](visual-before-desktop-empty-chat.png) | [Current](visual-after-desktop-empty-chat.png) |
+| Desktop conversation | [Before](visual-before-desktop-chat.png) | [Current](visual-after-desktop-chat.png) |
+| Desktop connection settings | [Before](visual-before-desktop-settings.png) | [Current](visual-after-desktop-connection-settings.png) |
+| Mobile first-launch onboarding | [Before](visual-before-mobile-onboarding.png) | [Current](visual-after-mobile-onboarding.png) |
+| Mobile empty chat | [Before](visual-before-mobile-empty-chat.png) | [Current](visual-after-mobile-empty-chat.png) |
+| Mobile conversation | [Before](visual-before-mobile-chat.png) | [Current](visual-after-mobile-chat.png) |
+| Mobile connection settings | [Before](visual-before-mobile-settings.png) | [Current](visual-after-mobile-connection-settings.png) |
 
-Additional actual card-preview captures: [desktop](visual-after-desktop-card-preview.png), [mobile](visual-after-mobile-card-preview.png).
+Avatar affordance: [desktop character settings](visual-after-desktop-character-settings.png), [mobile character settings](visual-after-mobile-character-settings.png). Card-preview workflows: [desktop](visual-after-desktop-card-preview.png), [mobile](visual-after-mobile-card-preview.png).
 
-## Verification
+## Checks
 
 - `npm run typecheck`, `npm test` (32 tests), `npm run build`, `npm run desktop:build` pass.
-- `npm run test:ui` passes existing chat isolation, persistence, reset, retry/edit, cancellation, storage failure, invite and demo/live provenance checks.
-- `node tests/connection-panel-smoke.mjs` passes all eight synthetic connection/model-selection scenarios with no external requests or page errors.
-- Additional Chromium checks pass at both review sizes: visible composer, no document horizontal overflow, keyboard dialog focus containment and Escape dismissal, character creation/preview/acknowledgement/save/edit, Enter send, and Shift+Enter newline. These renderer checks do not assert native file operations.
-- Both review sizes have zero browser runtime errors. Contrast for body text, captions, controls and focus indicators is retained. Reduced-motion and mobile safe-area rules are preserved.
+- `npm run test:ui` preserves chat isolation, persistence, reset, retry/edit, cancellation, storage failure, invite and mixed demo/live provenance checks.
+- `node tests/connection-panel-smoke.mjs` passes the original eight API/key/model scenarios and two demo/disclosure onboarding scenarios.
+- `node tests/composer-focus-smoke.mjs` fails against the untouched base at the keyboard-send focus assertion and passes six scenarios on this branch: keyboard send, send button, Tab navigation, outside pointer interaction, character-switch cancellation, and IME/Shift+Enter.
+- `node tests/avatar-ui-smoke.mjs` passes seven renderer scenarios: unsupported platform, picker cancellation, import/reset portrait refresh, safe error, broken image, remote URL rejection, and another character's URL rejection. Picker and storage are synthetic in these tests.
+- Additional captures exercise card creation/preview/acknowledgement/save/edit, dialog focus containment/Escape, visible composer and both review sizes, with zero browser runtime errors. Caption/control contrast and reduced-motion/safe-area behavior are retained.
 
-## Parent follow-up
+The focus fix waits until React enables the composer. It restores focus only for a request started in the composer and cancels restoration when the user navigates elsewhere or leaves the page. IME handlers are unchanged.
 
-Native Electron smoke tests could not run in this environment: the Electron binary download fails and no display server is installed. The renderer build passes; Windows and Android acceptance remain with their platform owners.
-
-An existing focus issue was reproduced on both the untouched base and this branch: after keyboard send, `App.tsx` calls `input.focus()` before React removes the disabled state, leaving focus on the document body. This branch does not change that stateful logic. The app owner should defer focus until the composer is enabled.
-
-The existing first-launch form receives refined styling. A demo-first onboarding composition would require coordinated presentation ownership of `ConnectionPanel.tsx`; its handlers and state remain outside this branch's current scope. This is a draft for parent visual acceptance, with no merge, integration or release implied.
+Native Electron smoke remains unavailable in this environment because its binary download fails and there is no display server. Native avatar validation/storage and Windows/Android acceptance belong to their platform owners. This remains a draft pending user visual acceptance; no integration merge or release is implied.

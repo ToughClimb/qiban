@@ -26,6 +26,7 @@ const bundle = await build({
   platform: "browser",
   format: "iife",
   jsx: "automatic",
+  define: { "import.meta.env.BASE_URL": '"/"' },
 });
 const server = createServer((request, response) => {
   response.setHeader("Content-Type", request.url === "/bundle.js" ? "text/javascript" : "text/html");
@@ -37,7 +38,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 let browser;
 const failures = [];
 
-async function scenario(name, initial, exercise) {
+async function scenario(name, initial, exercise, openConnection = true) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const pageErrors = [];
@@ -97,6 +98,8 @@ async function scenario(name, initial, exercise) {
     await page.goto(origin);
     await expect(page.locator("dialog[open]")).toBeVisible();
     await expect(page.locator("#api-url")).toHaveValue(initial.baseUrl ?? "https://api.deepseek.com");
+    if (openConnection && !await page.locator("#api-url").isVisible())
+      await page.locator(".connection-options > summary").click();
     await exercise(page);
     assert.deepEqual(pageErrors, []);
     assert.deepEqual(remoteRequests, []);
@@ -127,6 +130,23 @@ try {
     headless: true,
     args: ["--no-sandbox"],
   });
+  await scenario("demo-first onboarding works without opening service fields", {}, async (page) => {
+    await expect(page.locator("#api-url")).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "先用演示聊天" })).toBeFocused();
+    await page.getByRole("button", { name: "先用演示聊天" }).click();
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
+    assert.deepEqual((await page.evaluate(() => window.bridgeCalls)).connect, []);
+    assert.equal((await page.evaluate(() => window.changedModes)).at(-1), "demo");
+  }, false);
+  await scenario("optional service fields open with the keyboard", {}, async (page) => {
+    const summary = page.locator(".connection-options > summary");
+    await expect(page.locator("#api-url")).not.toBeVisible();
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#api-url")).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#api-url")).not.toBeVisible();
+  }, false);
   for (const suffix of ["/v1/chat/completions", "/v1/"]) {
     await scenario(`first connection with ${suffix}`, {}, async (page) => {
       await page.locator("#api-url").fill(`https://models.example.invalid${suffix}`);
@@ -190,7 +210,7 @@ try {
     await chosen(page, "chat-alpha", 1);
   });
   assert.deepEqual(failures, [], "ConnectionPanel browser regressions");
-  console.log("PASS eight mocked browser scenarios; no external requests or page errors");
+  console.log("PASS ten mocked browser scenarios; no external requests or page errors");
 } finally {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));

@@ -58,6 +58,7 @@ export function App() {
   const request = useRef<AbortController | null>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const restoreComposerFocus = useRef(false);
   const character =
     companions.find((item) => item.id === selected) ?? characters[0];
   const messages = conversations[selected] ?? [];
@@ -134,8 +135,40 @@ export function App() {
     });
   }, [messages, busy, error]);
   useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    // Disabling the textarea blurs it naturally; explicit navigation cancels return.
+    function leaveComposer(event: Event) {
+      if (!input.current?.closest(".composer")?.contains(event.target as Node))
+        restoreComposerFocus.current = false;
+    }
+    function leavePage() {
+      if (document.hidden) restoreComposerFocus.current = false;
+    }
+    document.addEventListener("focusin", leaveComposer);
+    document.addEventListener("pointerdown", leaveComposer);
+    document.addEventListener("visibilitychange", leavePage);
+    return () => {
+      document.removeEventListener("focusin", leaveComposer);
+      document.removeEventListener("pointerdown", leaveComposer);
+      document.removeEventListener("visibilitychange", leavePage);
+    };
+  }, []);
+  useEffect(() => {
+    if (busy || request.current || !restoreComposerFocus.current) return;
+    restoreComposerFocus.current = false;
+    const composerInput = input.current;
+    if (
+      composerInput &&
+      !composerInput.disabled &&
+      document.hasFocus() &&
+      (document.activeElement === document.body ||
+        composerInput.closest(".composer")?.contains(document.activeElement))
+    )
+      composerInput.focus();
+  }, [busy, messages, locked, mode, storageReady]);
 
   function cancelRequest() {
+    restoreComposerFocus.current = false;
     request.current?.abort();
     request.current = null;
     setBusy(false);
@@ -149,6 +182,9 @@ export function App() {
   async function reply(history: Message[]) {
     if (request.current || !mode || locked || !storageReady) return;
     const controller = new AbortController();
+    restoreComposerFocus.current =
+      input.current?.closest(".composer")?.contains(document.activeElement) ??
+      false;
     request.current = controller;
     setBusy(true);
     setError("");
@@ -190,7 +226,6 @@ export function App() {
       if (request.current === controller) {
         request.current = null;
         setBusy(false);
-        input.current?.focus();
       }
     }
   }
@@ -240,6 +275,18 @@ export function App() {
     setError("");
     input.current?.focus();
   }
+  async function changeAvatar(id: string, reset = false) {
+    const result = reset
+      ? await desktop?.deleteAvatar?.(id)
+      : await desktop?.importAvatar?.(id);
+    if (!result) return;
+    if (!result.ok) throw Error(result.error);
+    if (result.value === null) return;
+    const list = await desktop!.cards();
+    if (!list.ok) throw Error(list.error);
+    setCompanions(list.value.characters);
+    setCardIssues(list.value.issues);
+  }
   return (
     <div className="app-shell">
       <CharacterPicker
@@ -253,15 +300,18 @@ export function App() {
             <Avatar character={character} size="small" />
             <div>
               <h2>{character.name}</h2>
-              <p>
-                {character.kind} · {character.role}
-              </p>
             </div>
           </div>
           <div className="header-actions">
             {desktop && (
               <CardPanel
                 character={character}
+                onChangeAvatar={desktop?.importAvatar
+                  ? (id) => changeAvatar(id)
+                  : undefined}
+                onResetAvatar={desktop?.deleteAvatar
+                  ? (id) => changeAvatar(id, true)
+                  : undefined}
                 onChanged={(list, id) => {
                   cancelRequest();
                   setCompanions(list.characters);
@@ -300,11 +350,12 @@ export function App() {
             )}
             <button
               className="quiet-button"
+              aria-label="清空聊天"
               type="button"
               onClick={reset}
               disabled={!messages.length}
             >
-              清空聊天
+              清空
             </button>
           </div>
         </header>
@@ -312,7 +363,6 @@ export function App() {
           className={`mode-notice ${mode === "live" ? "live-notice" : ""}`}
           role="status"
         >
-          <span aria-hidden="true">{mode === "live" ? "◇" : "◌"}</span>
           {configError ? (
             <>
               <span>暂时连接不上栖伴。</span>
@@ -322,10 +372,10 @@ export function App() {
             </>
           ) : mode === "demo" ? (
             <span>
-              <strong>演示模式</strong> · 新回复为预设示例，不是实时 AI 生成。
+              <strong>演示模式</strong> · 虚拟伙伴，回复为预设示例。
             </span>
           ) : mode === "live" ? (
-            <span>AI 角色对话 · 新回复由 AI 生成，伙伴是虚拟角色。</span>
+            <span>虚拟伙伴 · AI 生成回复</span>
           ) : (
             <span>正在连接栖伴…</span>
           )}
@@ -369,6 +419,7 @@ export function App() {
         <ChatMessages
           character={character}
           messages={messages}
+          mode={mode}
           busy={busy}
           error={error}
           retryDisabled={!mode || locked}
@@ -377,25 +428,6 @@ export function App() {
           scrollArea={scrollArea}
         />
         <div className="composer-area">
-          {!messages.length && (
-            <div className="starters" aria-label="话题建议">
-              {character.starters.map((starter) => (
-                <button
-                  key={starter}
-                  onClick={() => {
-                    setDrafts((current) => ({
-                      ...current,
-                      [selected]: starter,
-                    }));
-                    input.current?.focus();
-                  }}
-                >
-                  {starter}
-                  <span aria-hidden="true"> ↗</span>
-                </button>
-              ))}
-            </div>
-          )}
           <form className="composer" onSubmit={submit}>
             <label className="sr-only" htmlFor="message">
               给{character.name}发消息
@@ -406,9 +438,10 @@ export function App() {
               placeholder={
                 unanswered
                   ? "先等待回复，或重试、编辑上一条消息"
-                  : `想和${character.name}说点什么？`
+                  : "说点什么…"
               }
               rows={2}
+              aria-description="Enter 发送，Shift + Enter 换行"
               maxLength={MAX_MESSAGE_LENGTH}
               value={draft}
               onChange={(event) =>
@@ -430,11 +463,9 @@ export function App() {
               }}
             />
             <div className="composer-bottom">
-              <span>
-                {draft.length > 1800
-                  ? `${draft.length}/${MAX_MESSAGE_LENGTH}`
-                  : "Enter 发送 · Shift + Enter 换行"}
-              </span>
+              {draft.length > 1800 && (
+                <span>{draft.length}/{MAX_MESSAGE_LENGTH}</span>
+              )}
               <button
                 className="send-button"
                 type="submit"
@@ -451,22 +482,13 @@ export function App() {
               </button>
             </div>
           </form>
-          <p
-            className={`privacy-note ${storageError ? "storage-warning" : ""}`}
-            role={storageError ? "status" : undefined}
-          >
-            {storageError
-              ? desktop
+          {storageError && (
+            <p className="privacy-note storage-warning" role="status">
+              {desktop
                 ? "本地记录无法保存，请检查磁盘空间并备份数据。"
-                : "浏览器无法保存记录；关闭页面后，本次聊天可能丢失。"
-              : desktop
-                ? mode === "live"
-                  ? "记录仅保存在本机；近期聊天会发送至你设置的 AI 服务。"
-                  : "记录仅保存在本机。演示聊天不会发给 AI 服务。"
-                : mode === "live"
-                  ? "记录保存在此浏览器；发送时，近期对话会交给 AI 服务处理。"
-                  : "记录只保存在此浏览器，可随时清空。演示聊天不会发给 AI 服务。"}
-          </p>
+                : "浏览器无法保存记录；关闭页面后，本次聊天可能丢失。"}
+            </p>
+          )}
         </div>
       </main>
     </div>

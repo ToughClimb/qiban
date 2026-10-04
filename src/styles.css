@@ -19,7 +19,10 @@
 body {
   margin: 0;
 }
-button, input, textarea, select {
+button,
+input,
+textarea,
+select {
   font: inherit;
 }
 button {
@@ -30,14 +33,23 @@ button:disabled {
   color: #737b72;
   background-color: #e9ece5;
 }
-button, a, input, textarea, select, summary {
+button,
+a,
+input,
+textarea,
+select,
+summary {
   touch-action: manipulation;
 }
-button:focus-visible, a:focus-visible, summary:focus-visible {
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
-input:focus-visible, textarea:focus-visible, select:focus-visible {
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -82,49 +94,23 @@ button {
   border-radius: 20px 20px 6px 6px;
   font: 24px var(--serif);
 }
-.brand small {
-  display: block;
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 3px;
-  margin-top: 3px;
-  color: var(--muted);
-}
-.sidebar-intro {
-  margin: 30px 10px 24px;
-}
+
+
 .eyebrow {
   color: var(--muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 2px;
 }
-.sidebar-intro h1 {
-  font: 400 25px/1.6 var(--serif);
-  margin: 12px 0 10px;
-  letter-spacing: 1px;
-}
-.sidebar-intro > p:last-child {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 12px 0 0;
-}
-.companions-label {
-  display: flex;
-  justify-content: space-between;
-  margin: 0 10px 15px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.companions-label span {
-  font-size: 8px;
-  letter-spacing: 1.4px;
-  align-self: center;
-}
+
+
+
+
 .character-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 36px;
   overflow-y: auto;
   min-height: 0;
   scrollbar-width: thin;
@@ -176,18 +162,8 @@ button {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-.character-info strong > span {
-  font-size: 10px;
-  color: var(--muted);
-  font-weight: 400;
-}
-.character-info small {
-  display: block;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.8;
-  margin-top: 5px;
-}
+
+
 .selection-dot {
   height: 4px;
   width: 4px;
@@ -198,28 +174,10 @@ button {
 .selected .selection-dot {
   background: var(--accent);
 }
-.sidebar-footer {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-top: auto;
-  padding: 24px 8px 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.9;
-}
-.sidebar-footer p {
-  margin: 0;
-}
-.leaf {
-  width: 25px;
-  flex-shrink: 0;
-  color: #71836b;
-}
-.leaf svg {
-  display: block;
-  width: 100%;
-}
+
+
+
+
 .chat-panel {
   display: flex;
   flex: 1;
@@ -257,11 +215,7 @@ button {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.chat-header p {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 4px 0 0;
-}
+
 .header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -305,13 +259,12 @@ button {
 .mode-notice strong {
   font-weight: 500;
 }
-.mode-notice > span:first-child {
-  font-size: 16px;
-}
+
 .live-notice {
   color: var(--accent);
 }
-.mode-notice button, .retry-row button {
+.mode-notice button,
+.retry-row button {
   color: var(--accent);
   border: 0;
   background: transparent;
@@ -325,7 +278,7 @@ button {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 max(40px, calc((100% - 760px) / 2)) 20px;
+  padding: 20px max(40px, calc((100% - 760px) / 2)) 20px;
   scrollbar-width: thin;
   scrollbar-color: #c8d0c1 transparent;
 }
@@ -334,7 +287,7 @@ button {
   justify-content: center;
   align-items: center;
   gap: 44px;
-  padding: 45px 0 42px;
+  padding: 30px 0 34px;
 }
 .welcome-portrait {
   position: relative;
@@ -359,39 +312,12 @@ button {
   height: 148px;
   border-radius: 50% 50% 45% 45%;
 }
-.welcome-copy {
-  min-width: 0;
-}
-.welcome-label {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 1px;
-}
-.welcome h3 {
-  font: 400 34px/1.65 var(--serif);
-  letter-spacing: 1px;
-  margin: 12px 0 13px;
-  overflow-wrap: anywhere;
-}
-.welcome p {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 0;
-  line-height: 1.8;
-  overflow-wrap: anywhere;
-}
-.conversation-start {
-  margin: 20px 0 32px;
-  text-align: center;
-  font: 13px var(--serif);
-  color: var(--muted);
-  letter-spacing: 1px;
-}
-.conversation-start span {
-  font: 10px/1.8 sans-serif;
-  letter-spacing: 0;
-}
+
+
+
+
+
+
 .message {
   display: flex;
   align-items: flex-start;
@@ -405,7 +331,7 @@ button {
 .tiny {
   width: 28px;
   height: 32px;
-  margin-top: 22px;
+  margin-top: 0;
 }
 .message-name {
   display: block;
@@ -466,28 +392,6 @@ button {
 .composer-area {
   padding: 0 max(40px, calc((100% - 760px) / 2)) 19px;
   flex-shrink: 0;
-}
-.starters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 24px;
-  margin: 0 0 15px;
-}
-.starters button {
-  color: var(--accent);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid #c7d0be;
-  border-radius: 0;
-  font-size: 12px;
-  padding: 8px 0;
-}
-.starters button span {
-  margin-left: 10px;
-}
-.starters button:hover {
-  border-color: var(--accent);
-  background: #f0f2eb;
 }
 .composer {
   display: grid;
@@ -664,7 +568,9 @@ button {
   font-weight: 500;
   margin: 18px 0 8px;
 }
-.settings-dialog input:not([type="checkbox"]), .settings-dialog select, .settings-dialog textarea {
+.settings-dialog input:not([type="checkbox"]),
+.settings-dialog select,
+.settings-dialog textarea {
   display: block;
   width: 100%;
   padding: 12px;
@@ -702,7 +608,8 @@ button {
   flex-wrap: wrap;
   margin-top: 26px;
 }
-.settings-actions .send-button, .settings-actions .quiet-button {
+.settings-actions .send-button,
+.settings-actions .quiet-button {
   font-size: 12px;
   padding: 12px 15px;
 }
@@ -752,6 +659,16 @@ button {
   gap: 10px;
   flex-wrap: wrap;
   margin: 24px 0;
+}
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.avatar-editor .quiet-button {
+  min-height: 44px;
 }
 .card-actions .field-note {
   flex-basis: 100%;
@@ -808,13 +725,59 @@ button {
 .card-issues summary {
   cursor: pointer;
 }
+
+.message:has(.message-name) .tiny {
+  margin-top: 22px;
+}
+.onboarding-portraits {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 25px;
+}
+.onboarding-portraits img {
+  width: 48px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 50% 50% 43% 43%;
+}
+.demo-welcome {
+  padding: 0 0 22px;
+}
+.demo-welcome .send-button {
+  min-height: 44px;
+  padding: 12px 20px;
+}
+.demo-welcome .field-note {
+  margin-top: 12px;
+}
+.connection-options {
+  border-top: 1px solid var(--line);
+}
+.connection-options > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 18px 0;
+}
+.connection-options[open] > summary {
+  padding-bottom: 6px;
+}
+.connection-options .settings-actions {
+  margin-bottom: 24px;
+}
+.connection-dialog .local-data {
+  margin-top: 0;
+  padding-top: 17px;
+}
+
 @media (min-width: 1400px) {
   .companions {
     width: 290px;
     padding-left: 32px;
     padding-right: 32px;
   }
-  .chat-header, .mode-notice {
+  .chat-header,
+  .mode-notice {
     margin-left: 55px;
     margin-right: 55px;
   }
@@ -827,14 +790,10 @@ button {
   .character-info strong {
     display: block;
   }
-  .character-info strong > span {
-    display: block;
-    margin-top: 2px;
-  }
-  .character-info small {
-    display: none;
-  }
-  .chat-header, .mode-notice {
+
+
+  .chat-header,
+  .mode-notice {
     margin-left: 26px;
     margin-right: 26px;
   }
@@ -850,9 +809,7 @@ button {
     gap: 26px;
     padding: 36px 0;
   }
-  .welcome h3 {
-    font-size: 29px;
-  }
+
   .hero {
     width: 100px;
     height: 120px;
@@ -886,19 +843,14 @@ button {
     align-items: baseline;
     gap: 9px;
   }
-  .brand small {
-    font-size: 8px;
-    letter-spacing: 2px;
-    margin: 0;
-  }
-  .sidebar-intro, .companions-label, .sidebar-footer {
-    display: none;
-  }
+
+
   .character-list {
     flex-direction: row;
     gap: 8px;
     overflow-x: auto;
     overflow-y: hidden;
+    margin-top: 0;
     padding-top: 9px;
   }
   .character-card {
@@ -929,7 +881,7 @@ button {
     font-weight: 500;
     text-align: center;
   }
-  .character-info strong > span, .character-info small, .selection-dot {
+  .selection-dot {
     display: none;
   }
   .chat-header {
@@ -946,10 +898,7 @@ button {
   .chat-header h2 {
     font-size: 14px;
   }
-  .chat-header p {
-    font-size: 11px;
-    margin-top: 3px;
-  }
+
   .header-actions {
     gap: 0;
   }
@@ -963,11 +912,9 @@ button {
     gap: 6px;
     font-size: 11px;
   }
-  .mode-notice > span:first-child {
-    font-size: 14px;
-  }
+
   .message-area {
-    padding: 0 22px 12px;
+    padding: 18px 22px 12px;
   }
   .welcome {
     padding: 26px 0 30px;
@@ -983,20 +930,9 @@ button {
   .welcome-portrait::after {
     right: 15px;
   }
-  .welcome-label {
-    font-size: 11px;
-    letter-spacing: .5px;
-  }
-  .welcome h3 {
-    font-size: 25px;
-    line-height: 1.7;
-    letter-spacing: .5px;
-    margin: 8px 0;
-  }
-  .welcome p {
-    font-size: 11px;
-    max-width: 180px;
-  }
+
+
+
   .message {
     gap: 10px;
     margin-bottom: 22px;
@@ -1018,23 +954,9 @@ button {
   .user .bubble {
     padding: 10px 14px;
   }
-  .conversation-start {
-    margin: 16px 0 26px;
-    font-size: 12px;
-  }
+
   .composer-area {
     padding: 0 16px max(12px, env(safe-area-inset-bottom));
-  }
-  .starters {
-    gap: 6px 18px;
-    margin-bottom: 12px;
-  }
-  .starters button {
-    font-size: 11px;
-    padding: 8px 0;
-  }
-  .starters button span {
-    margin-left: 4px;
   }
   .composer {
     padding: 12px 14px 10px;
@@ -1042,7 +964,8 @@ button {
   }
   .composer textarea {
     font-size: 16px;
-    min-height: 48px;
+    height: 52px;
+    min-height: 52px;
   }
   .composer-bottom > span {
     font-size: 10px;
@@ -1070,7 +993,9 @@ button {
   .settings-dialog h2 {
     font-size: 25px;
   }
-  .settings-dialog input:not([type="checkbox"]), .settings-dialog select, .settings-dialog textarea {
+  .settings-dialog input:not([type="checkbox"]),
+  .settings-dialog select,
+  .settings-dialog textarea {
     font-size: 16px;
   }
   .settings-intro {
@@ -1079,7 +1004,8 @@ button {
   .settings-actions {
     gap: 8px;
   }
-  .settings-actions .send-button, .settings-actions .quiet-button {
+  .settings-actions .send-button,
+  .settings-actions .quiet-button {
     padding: 12px;
     font-size: 11px;
   }
@@ -1094,19 +1020,14 @@ button {
   .welcome {
     gap: 16px;
   }
-  .welcome h3 {
-    font-size: 22px;
-  }
+
   .hero {
     width: 68px;
     height: 84px;
   }
 }
 @media (max-height: 650px) and (min-width: 701px) {
-  .sidebar-intro {
-    margin-top: 25px;
-    margin-bottom: 20px;
-  }
+
   .welcome {
     padding: 22px 0;
   }
@@ -1114,9 +1035,7 @@ button {
     width: 94px;
     height: 112px;
   }
-  .welcome h3 {
-    font-size: 27px;
-  }
+
 }
 @media (prefers-reduced-motion: reduce) {
   * {

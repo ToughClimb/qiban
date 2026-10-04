@@ -126,16 +126,17 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
     <>
       <button
         className="quiet-button"
+        aria-label="连接与数据"
         onClick={() => {
           setError("");
           void refresh();
           dialog.current?.showModal();
         }}
       >
-        连接与数据
+        设置
       </button>
       <dialog
-        className="settings-dialog"
+        className="settings-dialog connection-dialog"
         ref={dialog}
         onCancel={(event) => {
           if (busy) event.preventDefault();
@@ -150,117 +151,146 @@ export function ConnectionPanel({ onChanged, onDeleteData }: Props) {
         >
           ×
         </button>
-        <p className="eyebrow">你的栖伴，你来选择</p>
-        <h2>在这里，慢慢聊。</h2>
-        <p className="settings-intro">
-          先试试演示聊天，或连接自己的 AI 服务。
-          <br />
-          密钥和聊天只会发送至你填写的服务。
+        {!status?.hasKey && (
+          <div className="onboarding-portraits" aria-hidden="true">
+            {["lin", "tao", "moon"].map((id) => (
+              <img
+                key={id}
+                src={`${import.meta.env.BASE_URL}characters/${id}.svg`}
+                alt=""
+                draggable={false}
+              />
+            ))}
+          </div>
+        )}
+        <p className="eyebrow">
+          {status?.hasKey ? "随时调整你的栖伴" : "欢迎来到栖伴"}
         </p>
-        <form onSubmit={connect}>
-          <label htmlFor="api-url">服务地址</label>
-          <input
-            id="api-url"
-            type="url"
-            autoComplete="off"
-            value={baseUrl}
-            maxLength={2048}
-            onChange={(event) => setBaseUrl(event.target.value)}
+        <h2>{status?.hasKey ? "连接与数据" : "先认识一下。"}</h2>
+        <p className="settings-intro">
+          {status?.hasKey
+            ? "调整服务和模型，或回到轻松的演示聊天。"
+            : "找一位虚拟伙伴，说说今天的小事。"}
+        </p>
+        <div className="demo-welcome">
+          <button
+            className="send-button"
+            type="button"
+            onClick={() => void demo()}
             disabled={busy}
-            required
-          />
-          <label htmlFor="api-key">API 密钥</label>
-          <input
-            id="api-key"
-            type="password"
-            autoComplete="off"
-            value={key}
-            maxLength={4096}
-            placeholder={
-              status?.hasKey
-                ? "留空可使用当前密钥；更换地址需重新填写"
-                : "粘贴服务方提供的密钥"
-            }
-            onChange={(event) => setKey(event.target.value)}
-            disabled={busy}
-          />
-          <label className="remember-key">
+            ref={(button) => {
+              // React autoFocus runs while closed; native dialog needs the attribute.
+              if (button) button.autofocus = true;
+            }}
+          >
+            先用演示聊天 <span aria-hidden="true">→</span>
+          </button>
+          <p className="field-note">
+            无需密钥。回复是预设示例，不会调用 AI 服务。
+          </p>
+        </div>
+        {error && (
+          <p role="alert" className="chat-error">
+            {error}
+          </p>
+        )}
+        <details className="connection-options" open={status?.hasKey}>
+          <summary>连接自己的 AI 服务</summary>
+          <p className="field-note">
+            密钥和聊天只会发送至你填写的服务。
+          </p>
+          <form onSubmit={connect}>
+            <label htmlFor="api-url">服务地址</label>
             <input
-              type="checkbox"
-              checked={remember}
-              onChange={(event) => setRemember(event.target.checked)}
+              id="api-url"
+              type="url"
+              autoComplete="off"
+              value={baseUrl}
+              maxLength={2048}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              disabled={busy}
+              required
+            />
+            <label htmlFor="api-key">API 密钥</label>
+            <input
+              id="api-key"
+              type="password"
+              autoComplete="off"
+              value={key}
+              maxLength={4096}
+              placeholder={
+                status?.hasKey
+                  ? "留空可使用当前密钥；更换地址需重新填写"
+                  : "粘贴服务方提供的密钥"
+              }
+              onChange={(event) => setKey(event.target.value)}
               disabled={busy}
             />
-            仅在这台电脑记住密钥
-          </label>
-          <p className="field-note">
-            默认只在本次打开期间使用。记住时会用系统加密保存；服务费用由服务方收取。
-          </p>
-          {status?.hasKey && status.baseUrl === baseUrl && (
-            <div className="model-selection">
-              <label htmlFor="model-choice">
-                {status.models.length
-                  ? "请选择一个聊天模型"
-                  : "填写服务方提供的模型名称"}
-              </label>
-              {status.models.length ? (
-                <select
-                  id="model-choice"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  disabled={busy}
-                  required
-                >
-                  <option value="">请选择</option>
-                  {status.models.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  id="model-choice"
-                  value={model}
-                  maxLength={128}
-                  onChange={(event) => setModel(event.target.value)}
-                  disabled={busy}
-                  required
-                />
-              )}
-              <p className="field-note">
-                {status.needsSelection
-                  ? "这个服务没有唯一的默认模型，栖伴不会替你随意选择。"
-                  : "可以更换聊天模型，或修改手动填写的模型名称。"}
-              </p>
-            </div>
-          )}
-          {error && (
-            <p role="alert" className="chat-error">
-              {error}
+            <label className="remember-key">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(event) => setRemember(event.target.checked)}
+                disabled={busy}
+              />
+              仅在这台电脑记住密钥
+            </label>
+            <p className="field-note">
+              默认只在本次打开期间使用。记住时会用系统加密保存；服务费用由服务方收取。
             </p>
-          )}
-          <div className="settings-actions">
-            <button className="send-button" type="submit" disabled={busy}>
-              {busy
-                ? "正在检查连接…"
-                : status?.hasKey &&
-                    status.baseUrl === baseUrl &&
-                    !key &&
-                    remember === status.remembered
-                  ? "使用这个模型"
-                  : "连接并开始聊天"}
-            </button>
-            <button
-              className="quiet-button"
-              type="button"
-              onClick={() => void demo()}
-              disabled={busy}
-            >
-              先用演示聊天
-            </button>
-          </div>
-        </form>
+            {status?.hasKey && status.baseUrl === baseUrl && (
+              <div className="model-selection">
+                <label htmlFor="model-choice">
+                  {status.models.length
+                    ? "请选择一个聊天模型"
+                    : "填写服务方提供的模型名称"}
+                </label>
+                {status.models.length ? (
+                  <select
+                    id="model-choice"
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    disabled={busy}
+                    required
+                  >
+                    <option value="">请选择</option>
+                    {status.models.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="model-choice"
+                    value={model}
+                    maxLength={128}
+                    onChange={(event) => setModel(event.target.value)}
+                    disabled={busy}
+                    required
+                  />
+                )}
+                <p className="field-note">
+                  {status.needsSelection
+                    ? "这个服务没有唯一的默认模型，栖伴不会替你随意选择。"
+                    : "可以更换聊天模型，或修改手动填写的模型名称。"}
+                </p>
+              </div>
+            )}
+            <div className="settings-actions">
+              <button className="send-button" type="submit" disabled={busy}>
+                {busy
+                  ? "正在检查连接…"
+                  : status?.hasKey &&
+                      status.baseUrl === baseUrl &&
+                      !key &&
+                      remember === status.remembered
+                    ? "使用这个模型"
+                    : "连接并开始聊天"}
+              </button>
+            </div>
+          </form>
+        </details>
         <details className="local-data">
           <summary>本地数据与隐私</summary>
           <p>
