@@ -46,10 +46,12 @@ export const characters = [
 ] as const;
 export type Character = (typeof characters)[number];
 export type CharacterId = (typeof characters)[number]["id"];
+export type Mode = "demo" | "live";
 export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  mode?: Mode;
 };
 export type ChatRequest = {
   characterId: CharacterId;

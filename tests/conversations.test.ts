@@ -9,7 +9,12 @@ import {
 } from "../src/conversations.ts";
 import type { Message } from "../shared/characters.ts";
 const user: Message = { id: "1", role: "user", content: "hello" };
-const answer: Message = { id: "2", role: "assistant", content: "hi" };
+const answer: Message = {
+  id: "2",
+  role: "assistant",
+  content: "hi",
+  mode: "demo",
+};
 test("saving and reloading isolates characters; reset removes only the chosen conversation", () => {
   let raw = "";
   const storage = {

@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { MAX_REQUEST_BYTES } from "../shared/chat.js";
 import { parseChat } from "./validation.js";
 import type { Config, Provider } from "./provider.js";
 
@@ -62,7 +63,7 @@ export function createApp(config: Config, provider: Provider) {
       buckets.set(key, bucket);
       next();
     },
-    express.json({ limit: "48kb" }),
+    express.json({ limit: MAX_REQUEST_BYTES }),
     async (req, res) => {
       const request = parseChat(req.body);
       if (!request)
@@ -97,14 +98,12 @@ export function createApp(config: Config, provider: Provider) {
   );
   const onError: ErrorRequestHandler = (error, _req, res, _next) => {
     const status = error?.type === "entity.too.large" ? 413 : 400;
-    res
-      .status(status)
-      .json({
-        error:
-          status === 413
-            ? "消息太长，请缩短后再试。"
-            : "消息格式不正确，请再试一次。",
-      });
+    res.status(status).json({
+      error:
+        status === 413
+          ? "消息太长，请缩短后再试。"
+          : "消息格式不正确，请再试一次。",
+    });
   };
   app.use(onError);
   return app;

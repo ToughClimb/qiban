@@ -4,6 +4,7 @@ import {
   MAX_MESSAGE_LENGTH,
   type ChatRequest,
 } from "../shared/characters.js";
+import { fitsChatBudget } from "../shared/chat.js";
 export function parseChat(value: unknown): ChatRequest | null {
   if (!value || typeof value !== "object") return null;
   const body = value as Record<string, unknown>;
@@ -21,7 +22,6 @@ export function parseChat(value: unknown): ChatRequest | null {
     body.messages.length > MAX_HISTORY
   )
     return null;
-  let total = 0;
   for (const [index, message] of body.messages.entries()) {
     if (
       !message ||
@@ -37,8 +37,8 @@ export function parseChat(value: unknown): ChatRequest | null {
         (message.role === "user" ? MAX_MESSAGE_LENGTH : 8000)
     )
       return null;
-    total += message.content.length;
   }
-  if (total > 32_000 || body.messages.at(-1).role !== "user") return null;
-  return body as ChatRequest;
+  if (body.messages.at(-1).role !== "user") return null;
+  const request = body as ChatRequest;
+  return fitsChatBudget(request) ? request : null;
 }

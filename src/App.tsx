@@ -97,17 +97,24 @@ export function App() {
     setError("");
     const id = selected;
     try {
-      const content = await sendMessage(
+      const reply = await sendMessage(
         id,
         history,
         accessToken,
         AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]),
       );
       if (request.current !== controller) return;
+      setMode(reply.mode);
+      if (reply.mode === "demo") setAccessToken("");
       setConversations((current) =>
         replaceConversation(current, id, [
           ...history,
-          { id: crypto.randomUUID(), role: "assistant", content },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: reply.content,
+            mode: reply.mode,
+          },
         ]),
       );
     } catch (failure) {
@@ -147,6 +154,17 @@ export function App() {
     );
     setDrafts((current) => ({ ...current, [selected]: "" }));
     void reply(history);
+  }
+  function editPending() {
+    const last = messages.at(-1);
+    if (busy || last?.role !== "user") return;
+    cancelRequest();
+    setConversations((current) =>
+      replaceConversation(current, selected, messages.slice(0, -1)),
+    );
+    setDrafts((current) => ({ ...current, [selected]: last.content }));
+    setError("");
+    setTimeout(() => input.current?.focus(), 0);
   }
   function reset() {
     if (
@@ -203,10 +221,10 @@ export function App() {
             </>
           ) : mode === "demo" ? (
             <span>
-              <strong>演示模式</strong> · 回复为预设示例，不是实时 AI 生成。
+              <strong>演示模式</strong> · 新回复为预设示例，不是实时 AI 生成。
             </span>
           ) : mode === "live" ? (
-            <span>AI 角色对话 · 回复由 AI 生成，伙伴是虚拟角色。</span>
+            <span>AI 角色对话 · 新回复由 AI 生成，伙伴是虚拟角色。</span>
           ) : (
             <span>正在连接栖伴…</span>
           )}
@@ -246,6 +264,7 @@ export function App() {
           error={error}
           retryDisabled={!mode || locked}
           onRetry={() => void reply(messages)}
+          onEdit={editPending}
           scrollArea={scrollArea}
         />
         <div className="composer-area">
@@ -277,7 +296,7 @@ export function App() {
               id="message"
               placeholder={
                 unanswered
-                  ? "先等待或重试上一条回复"
+                  ? "先等待回复，或重试、编辑上一条消息"
                   : `想和${character.name}说点什么？`
               }
               rows={2}

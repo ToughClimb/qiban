@@ -1,4 +1,8 @@
-import { createProvider, LIVE_MODEL } from "../server/provider.js";
+import {
+  createProvider,
+  LIVE_MODEL,
+  readProviderKey,
+} from "../server/provider.js";
 import type { ChatRequest } from "../shared/characters.js";
 
 // Explicitly authorized manual check only; npm test never imports this file.
@@ -8,15 +12,16 @@ if (process.env.QIBAN_LIVE_SMOKE_AUTHORIZED !== "yes") {
   );
   process.exit(2);
 }
-if (!process.env.DEEPSEEK_API_KEY) {
+const apiKey = readProviderKey(process.env);
+if (!apiKey) {
   console.error(
-    "Blocked: DEEPSEEK_API_KEY binding is unavailable. Republish the environment and start a fresh task.",
+    "Blocked: DEEPSEEK_API_KEY or deepseek binding is unavailable. Republish the environment and start a fresh task.",
   );
   process.exit(2);
 }
 const provider = createProvider({
   mode: "live",
-  apiKey: process.env.DEEPSEEK_API_KEY,
+  apiKey,
 });
 try {
   const first: ChatRequest = {

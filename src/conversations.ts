@@ -23,7 +23,10 @@ export function readConversations(
             message.role === (index % 2 === 0 ? "user" : "assistant") &&
             typeof message.content === "string" &&
             message.content.length > 0 &&
-            message.content.length <= 8000,
+            message.content.length <= 8000 &&
+            (message.mode === undefined ||
+              (message.role === "assistant" &&
+                ["demo", "live"].includes(message.mode))),
         )
       ) {
         result[id as CharacterId] = messages;

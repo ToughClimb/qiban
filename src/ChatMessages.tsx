@@ -8,6 +8,7 @@ type Props = {
   error: string;
   retryDisabled: boolean;
   onRetry: () => void;
+  onEdit: () => void;
   scrollArea: RefObject<HTMLDivElement | null>;
 };
 export function ChatMessages({
@@ -17,6 +18,7 @@ export function ChatMessages({
   error,
   retryDisabled,
   onRetry,
+  onEdit,
   scrollArea,
 }: Props) {
   return (
@@ -57,7 +59,9 @@ export function ChatMessages({
           )}
           <div>
             <span className="message-name">
-              {message.role === "user" ? "你" : character.name}
+              {message.role === "user"
+                ? "你"
+                : `${character.name} · ${message.mode === "demo" ? "演示回复" : message.mode === "live" ? "AI 回复" : "历史回复"}`}
             </span>
             <p className="bubble">{message.content}</p>
           </div>
@@ -80,12 +84,13 @@ export function ChatMessages({
         <div className="retry-row">
           <span>
             {error
-              ? "可以重试，或清空这段聊天。"
+              ? "可以重试，或编辑这条消息。"
               : "上一条消息还没有收到回复。"}
           </span>
           <button disabled={retryDisabled} onClick={onRetry}>
             重试回复
           </button>
+          <button onClick={onEdit}>编辑消息</button>
         </div>
       )}
     </div>

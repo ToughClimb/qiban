@@ -11,7 +11,13 @@ import {
   type Provider,
 } from "../server/provider.ts";
 import { parseChat } from "../server/validation.ts";
-import type { ChatRequest } from "../shared/characters.ts";
+import { getCharacter, type ChatRequest } from "../shared/characters.ts";
+import {
+  fitsChatBudget,
+  trimChatContext,
+  utf8Bytes,
+  MAX_REQUEST_BYTES,
+} from "../shared/chat.ts";
 const request: ChatRequest = {
   characterId: "lin",
   messages: [{ role: "user", content: "今天有点累" }],
@@ -47,6 +53,23 @@ const options = (body: unknown = request) => ({
 });
 test("demo is default; live configuration fails closed without credentials and invite token", () => {
   assert.equal(readConfig({}).mode, "demo");
+  assert.equal(
+    readConfig({
+      QIBAN_MODE: "live",
+      DEEPSEEK_API_KEY: "synthetic-upper",
+      deepseek: "synthetic-lower",
+      QIBAN_ACCESS_TOKEN: token,
+    }).apiKey,
+    "synthetic-upper",
+  );
+  assert.equal(
+    readConfig({
+      QIBAN_MODE: "live",
+      deepseek: "synthetic-lower",
+      QIBAN_ACCESS_TOKEN: token,
+    }).apiKey,
+    "synthetic-lower",
+  );
   assert.throws(() => readConfig({ QIBAN_MODE: "live" }));
   assert.throws(() =>
     readConfig({
@@ -191,6 +214,11 @@ test("DeepSeek adapter uses fixed endpoint, proxy dispatcher, token cap, and fin
     assert.equal(body.stream, false);
     assert.equal(body.messages[0].role, "system");
     assert.match(body.messages[0].content, /林野/);
+    assert.ok(
+      body.messages[0].content.includes(
+        getCharacter(request.characterId)!.greeting,
+      ),
+    );
     assert.equal(body.messages[1].content, request.messages[0].content);
     return Response.json({
       choices: [
@@ -264,6 +292,29 @@ test("concurrent calls are bounded, and disconnect aborts the provider request",
     } finally {
       releases.forEach((release) => release());
       await Promise.all(pending);
+    }
+  });
+});
+
+test("Chinese and JSON-escaped context are trimmed to shared UTF-8 budgets and accepted over HTTP", async () => {
+  await withServer(config, { reply: async () => "ok" }, async (url) => {
+    for (const character of ["聊", "\u0001"]) {
+      const long: ChatRequest = {
+        characterId: "lin",
+        messages: Array.from({ length: 21 }, (_, index) => ({
+          role: index % 2 ? "assistant" : "user",
+          content: character.repeat(index % 2 ? 2000 : 1500),
+        })),
+      };
+      assert.ok(utf8Bytes(JSON.stringify(long)) > MAX_REQUEST_BYTES);
+      assert.equal(parseChat(long), null);
+      const prepared = trimChatContext(long);
+      assert.ok(fitsChatBudget(prepared));
+      assert.deepEqual(parseChat(prepared), prepared);
+      assert.equal(prepared.messages[0].role, "user");
+      assert.deepEqual(prepared.messages.at(-1), long.messages.at(-1));
+      const response = await fetch(`${url}/api/chat`, options(prepared));
+      assert.equal(response.status, 200);
     }
   });
 });

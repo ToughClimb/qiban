@@ -91,6 +91,31 @@ try {
   );
 
   await page.route("**/api/chat", (route) =>
+    route.fulfill({ status: 413, contentType: "application/json", body: "{}" }),
+  );
+  await page.getByRole("textbox", { name: /发消息/ }).fill("要编辑的长消息");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "消息太长，请编辑这条消息后再发送。",
+  );
+  await page.getByRole("button", { name: "编辑消息" }).click();
+  await expect(page.getByRole("textbox", { name: /发消息/ })).toHaveValue(
+    "要编辑的长消息",
+  );
+  await expect(page.getByRole("textbox", { name: /发消息/ })).toBeEnabled();
+  await expect(
+    page.getByText("林野专属的一次散步", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".message.user .bubble").filter({ hasText: "要编辑的长消息" }),
+  ).toHaveCount(0);
+  await page.unroute("**/api/chat");
+  await send(page, "编辑后的短消息");
+  console.log(
+    "PASS oversized recovery: edit and resend the pending message while retaining earlier conversation",
+  );
+
+  await page.route("**/api/chat", (route) =>
     route.fulfill({
       status: 502,
       contentType: "application/json",
@@ -223,7 +248,11 @@ try {
       throw new Error("Missing invite header");
     return route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ content: "测试回复", mode: "live" }),
+      body: JSON.stringify(
+        attempts === 2
+          ? { content: "测试回复", mode: "live" }
+          : { content: "切换后的演示回复", mode: "demo" },
+      ),
     });
   });
   await liveUI.page.goto(url);
@@ -246,6 +275,24 @@ try {
   const saved = await liveUI.page.evaluate(() => JSON.stringify(localStorage));
   if (saved.includes("synthetic-invite"))
     throw new Error("Invite token persisted");
+  await send(liveUI.page, "演示返回");
+  await expect(
+    liveUI.page.getByText("演示模式", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    liveUI.page.getByText("林野 · 演示回复", { exact: true }),
+  ).toBeVisible();
+  await expect(liveUI.page.getByLabel("输入体验口令，开始聊天")).toHaveCount(0);
+  await liveUI.page.reload();
+  await expect(
+    liveUI.page.getByText("林野 · 演示回复", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    liveUI.page.getByText("林野 · AI 回复", { exact: true }),
+  ).toBeVisible();
+  console.log(
+    "PASS response mode: stale live banner updates to demo; reply source survives reload with mixed history",
+  );
   await liveUI.context.close();
   console.log(
     "PASS mocked live UI: access gate, invalid-code recovery, memory-only invite token; no live provider calls",
