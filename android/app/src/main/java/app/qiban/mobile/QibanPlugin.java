@@ -363,6 +363,10 @@ public class QibanPlugin extends Plugin {
               if (!history.has(owner) || history.getJSONArray(owner).length() == 0) {
                 connection.cancelAll();
                 chatImages.deleteConversation(owner);
+              } else if (ChatImageStore.tailRemovedOrChanged(
+                  previous.getJSONArray(owner), history.getJSONArray(owner))) {
+                connection.cancelStaleForHistory(owner, history.getJSONArray(owner));
+                chatImages.invalidatePending(owner);
               }
             }
             chatImages.commitHistory(history);
