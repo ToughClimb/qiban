@@ -19,9 +19,16 @@
     "desktop:package": "npm run desktop:build && electron-forge package --platform=win32 --arch=x64",
     "desktop:make": "npm run desktop:build && electron-forge make --platform=win32 --arch=x64",
     "test:desktop": "node tests/desktop-smoke.mjs",
-    "check:card": "node --import tsx scripts/check-card.ts"
+    "check:card": "node --import tsx scripts/check-card.ts",
+    "android:sync": "npm run build && node android/tools/cap.mjs sync android",
+    "android:test": "node android/tools/build.mjs test",
+    "android:debug": "node android/tools/build.mjs debug",
+    "android:unsigned": "node android/tools/build.mjs unsigned",
+    "test:android-ui": "node tests/android-panel-smoke.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "8.0.0",
+    "@capacitor/core": "8.0.0",
     "electron-squirrel-startup": "^1.0.1",
     "express": "^5.2.1",
     "react": "^19.3.0",
@@ -29,6 +36,7 @@
     "undici": "^8.11.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.0.0",
     "@electron-forge/cli": "^8.0.1",
     "@electron-forge/maker-squirrel": "^8.0.1",
     "@electron-forge/maker-zip": "^8.0.1",

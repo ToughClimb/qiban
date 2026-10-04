@@ -1,0 +1,20 @@
+/* Native-only insets; shared visual styles remain owned by the UI workstream. */
+html[data-qiban-platform="android"] body {
+  padding: var(--safe-area-inset-top, 0px) var(--safe-area-inset-right, 0px)
+    var(--safe-area-inset-bottom, 0px) var(--safe-area-inset-left, 0px);
+}
+
+html[data-qiban-platform="android"] .app-shell {
+  height: calc(
+    100dvh - var(--safe-area-inset-top, 0px) -
+      var(--safe-area-inset-bottom, 0px)
+  );
+  min-height: 0;
+}
+
+html[data-qiban-platform="android"] dialog {
+  max-height: calc(
+    100dvh - var(--safe-area-inset-top, 0px) -
+      var(--safe-area-inset-bottom, 0px) - 32px
+  );
+}

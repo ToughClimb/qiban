@@ -1,0 +1,41 @@
+name: Android checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/android]
+  pull_request:
+    paths:
+      [
+        "android/**",
+        "src/**",
+        "shared/**",
+        "capacitor.config.ts",
+        "package*.json",
+        ".github/workflows/android.yml",
+      ]
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0"
+      - run: npm ci
+      - run: npm test
+      - run: npm run android:sync
+      - run: npm run android:test
+      - run: npm run android:unsigned
+      - name: Build local test APK
+        run: npm run android:debug
+      - name: Record APK hashes
+        run: sha256sum android/app/build/outputs/apk/{debug/app-debug.apk,release/app-release-unsigned.apk}
+      # No APK/key upload or publication. Debug identity is disposable and cannot establish release upgrade compatibility.
