@@ -14,7 +14,8 @@ import { rmSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join, sep, extname } from "node:path";
 import { CardStore, sourceText } from "./cards.js";
 import { AvatarStore, avatarId } from "./avatars.js";
-import { decodeAvatar } from "./image-decode.js";
+import { decodeAvatar, decodeChatImage } from "./image-decode.js";
+import { ChatImageStore } from "./chat-images.js";
 import { ConnectionStore } from "./store.js";
 import { HistoryStore } from "./history.js";
 import { DesktopService } from "./service.js";
@@ -48,13 +49,14 @@ protocol.registerSchemesAsPrivileged([
 ]);
 let window: BrowserWindow | undefined;
 let service: DesktopService | undefined;
+let chatImages: ChatImageStore | undefined;
 app.on("second-instance", () => {
   if (window?.isMinimized()) window.restore();
   window?.show();
   window?.focus();
 });
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => service?.cancelAll());
+app.on("before-quit", () => { service?.cancelAll(); chatImages?.discardDrafts(); });
 
 if (locked)
   app
@@ -63,6 +65,7 @@ if (locked)
       const renderer = resolve(__dirname, "renderer");
       const directory = app.getPath("userData");
       const avatars = new AvatarStore(directory);
+      const images = chatImages = new ChatImageStore(directory);
       let avatarRevision = 0;
       protocol.handle("qiban", async (req) => {
         const url = new URL(req.url);
@@ -127,7 +130,10 @@ if (locked)
       const history = new HistoryStore(directory);
       const cards = new CardStore(directory);
       cards.list();
-      service = new DesktopService(store, undefined, cards);
+      // Keep recovery/settings available if history is damaged. Do not prune
+      // image files without a successfully validated history snapshot.
+      try { images.reconcile(history.load()); } catch {}
+      service = new DesktopService(store, undefined, cards, images.resolve);
       function trusted(event: IpcMainInvokeEvent) {
         return (
           window &&
@@ -164,6 +170,24 @@ if (locked)
           return avatarUrl ? { ...character, avatarUrl } : character;
         }) };
       });
+      handle("chat-images:pick", async (value) => {
+        const id = avatarId(value);
+        if (!cards.has(id)) throw new ConnectionError("image", "角色不存在，请重新加载。");
+        const current = images.beginSelection(id);
+        const result = await dialog.showOpenDialog(window!, {
+          title: "选择聊天图片",
+          filters: [{ name: "本地聊天图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+          properties: ["openFile"],
+        });
+        if (result.canceled || !current() || !cards.has(id)) return null;
+        return images.import(id, result.filePaths[0], decodeChatImage, current);
+      });
+      handle("chat-images:preview", (value, imageId) => {
+        const id = avatarId(value);
+        if (!cards.has(id)) return null;
+        return images.preview(id, imageId);
+      });
+      handle("chat-images:discard", (value, imageId) => images.discard(avatarId(value), imageId));
       handle("avatars:import", async (value) => {
         const id = avatarId(value);
         if (!cards.has(id)) throw new ConnectionError("avatar", "角色不存在，请重新加载。");
@@ -224,8 +248,10 @@ if (locked)
         cards.delete(id);
         avatarRevision++;
         avatars.delete(id);
+        images.deleteCharacter(id);
         delete saved[id];
         history.save(saved);
+        images.reconcile(saved);
       });
       handle("cards:open", async () => {
         const error = await shell.openPath(cards.directory);
@@ -241,7 +267,14 @@ if (locked)
       handle("connection:demo", () => service!.demo());
       handle("connection:delete-key", () => service!.deleteKey());
       handle("history:load", () => history.load());
-      handle("history:save", (value) => history.save(value));
+      handle("history:save", (value) => {
+        const previous = history.load();
+        history.save(value);
+        const saved = history.load();
+        for (const owner of Object.keys(previous))
+          if ((saved[owner]?.length ?? 0) < (previous[owner]?.length ?? 0)) service!.cancelCharacter(owner);
+        images.reconcile(saved, previous);
+      });
       handle("data:path", () => directory);
       handle("diagnostics", () => ({
         schema_version: 1,
@@ -257,6 +290,7 @@ if (locked)
         cards.clear();
         avatarRevision++;
         avatars.clear();
+        images.clear();
         await window!.webContents.session.clearStorageData();
         await window!.webContents.session.clearCache();
       });
