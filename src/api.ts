@@ -1,13 +1,13 @@
-import type { DesktopBridge } from "../shared/desktop";
+import type { DesktopBridge, ChatReply } from "../shared/desktop";
 import {
   MAX_MESSAGE_LENGTH,
   type Mode,
   type CharacterId,
   type Message,
 } from "../shared/characters";
-import { fitsChatBudget, trimChatContext } from "../shared/chat";
+import { fitsChatBudget, prepareChatContext } from "../shared/chat";
 export type { Mode } from "../shared/characters";
-export type ChatReply = { content: string; mode: Mode };
+export type { ChatReply } from "../shared/desktop";
 export function desktopBridge(): DesktopBridge | undefined {
   return typeof window === "undefined" ? undefined : window.qiban;
 }
@@ -39,9 +39,11 @@ export async function sendMessage(
   accessToken: string,
   signal: AbortSignal,
 ): Promise<ChatReply> {
-  const request = trimChatContext({
+  const { request, omittedImageIds } = prepareChatContext({
     characterId,
-    messages: messages.map(({ role, content }) => ({ role, content })),
+    messages: messages.map(({ role, content, image }) => ({
+      role, content, ...(image === undefined ? {} : { image }),
+    })),
   });
   if (
     !fitsChatBudget(request) ||
@@ -49,6 +51,14 @@ export async function sendMessage(
   ) {
     throw new ChatError("消息太长，请编辑这条消息后再发送。", 413);
   }
+  const withOmissions = (reply: ChatReply): ChatReply => {
+    const omitted = [...new Set([...omittedImageIds, ...(reply.omittedImageIds ?? [])])];
+    return {
+      content: reply.content,
+      mode: reply.mode,
+      ...(omitted.length ? { omittedImageIds: omitted } : {}),
+    };
+  };
   const bridge = desktopBridge();
   if (bridge) {
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
@@ -58,7 +68,7 @@ export async function sendMessage(
     try {
       const result = await bridge.chat(request, id);
       if (!result.ok) throw new ChatError(result.error);
-      return result.value;
+      return withOmissions(result.value);
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
@@ -93,5 +103,5 @@ export async function sendMessage(
     (data.mode !== "demo" && data.mode !== "live")
   )
     throw new ChatError("回复没有送达，请再试一次。");
-  return { content: data.content, mode: data.mode };
+  return withOmissions({ content: data.content, mode: data.mode });
 }
