@@ -32,9 +32,13 @@ unsigned 输出 `app/build/outputs/apk/release/app-release-unsigned.apk`，不�
 
 ## 接口与验收
 
-`src/android/bridge.ts` 的 `AndroidPlugin` 只允许连接状态/模型选择/原生密钥输入、角色 CRUD 与系统导入导出、头像选择/删除、历史读写、诊断、聊天和取消。没有任意路径、URL 请求、shell 或 JavaScript 凭据参数。`createAndroidBridge` 适配现有 `DesktopBridge`，实现已协调的 `importAvatar(id): Promise<Result<string|null>>`、`deleteAvatar(id): Promise<Result<void>>`；取消选择返回null。`cards()` 的 `avatarUrl` 仅来自原生验证后的PNG，不来自卡片源JSON。共享可选类型和头像UI由Windows/视觉工作流负责合入；本分支不修改共享类型。共享启动改动只有 `src/main.tsx` 初始化和 `src/App.tsx` 选择 Android 设置面板。
+`src/android/bridge.ts` 的 `AndroidPlugin` 只允许连接状态/模型选择/原生密钥输入、角色 CRUD 与系统导入导出、头像选择/删除、历史读写、诊断、聊天和取消。没有任意路径、URL 请求、shell 或 JavaScript 凭据参数。`createAndroidBridge` 适配现有 `DesktopBridge`，实现已协调的 `importAvatar(id): Promise<Result<string|null>>`、`deleteAvatar(id): Promise<Result<void>>`；取消选择返回null。`cards()` 的 `avatarUrl` 仅来自原生验证后的PNG，不来自卡片源JSON。共享可选类型按父线程指定从 `faa19c3` 单独合入，头像UI仍由Windows/视觉工作流负责。共享启动改动只有 `src/main.tsx` 初始化和 `src/App.tsx` 选择 Android 设置面板。
 
-WebView 只允许打包的 `https://localhost` 资源，拒绝远程导航、弹窗和子资源；CSP 禁止网页网络连接，关闭调试、明文混合资源、文件/内容 URL 访问。只申请 INTERNET 权限。
+WebView 从APK资源直接提供规范路径的 `https://localhost` 文件，拒绝所有编码/歧义路径及 `/_capacitor_file_`、`/_capacitor_content_`、HTTP代理等保留路由，不能读取本机任意路径。禁止远程导航、弹窗、子资源、Service Worker网络；CSP 禁止网页网络连接，仅对打包首页的可信Capacitor启动脚本授予精确SHA256，兼容较旧WebView且不开放任意内联脚本。关闭调试、明文混合资源、文件/内容 URL 访问。仅有联网运行权限，AndroidX另生成应用内部签名权限。
+
+Capacitor内置HTTP、Cookies和WebView插件在原生注册表内替换为明确拒绝操作的实现；原始HTTP/Cookies JavaScript接口被移除。仅设置 `CapacitorHttp.enabled=false` 不构成原生能力边界。固定Qiban操作及必要SystemBars显示功能保留。回归测试通过真实PluginHandle派发调用禁用方法并验证拒绝，也对保留文件/内容/代理路由实际请求验证403。升级Capacitor必须重新审计其自动注册插件、接口和资源服务器。
+
+CI 的push及按需运行可在具有KVM的标准免费Ubuntu24.04公开仓库runner上执行API35模拟器安装、首页可见及原生离线演示切换检查；没有KVM时明确跳过，不声称验收。模拟器、UI树和日志只留在临时runner，不上传。模拟器成功仍不等于真机、最低API、系统文件选择器或签名升级验收。每个CI构建打印APK哈希与公开证书指纹，不保存私钥或密钥库；不同CI构建的测试身份不保证相同。最终合并SHA获父线程审查后，最快交付路径是按该SHA构建，记录哈希/证书，再仅上传指定APK；未经这个门槛当前流程不会上传。
 
 自动测试覆盖源 JSON 保留、确认与并发编辑、元数据隔离、凭据拒绝、原生 JSON/历史限额和公网地址检查；浏览器测试使用模拟插件。APK 构建、Robolectric 和浏览器通过不等于真机验收。维护者发布前需在真机检查首次离线演示、原生密钥取消/重填、TLS失败、模型切换、聊天取消、系统文件选择器、损坏数据、后台重启、键盘/安全区及升级后的数据保留。
 
