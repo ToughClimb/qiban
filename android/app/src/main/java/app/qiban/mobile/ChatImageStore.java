@@ -35,11 +35,27 @@ public final class ChatImageStore {
   private long clock = 0;
 
   public ChatImageStore(Context context) {
-    this(new File(context.getFilesDir(), "qiban-chat-images"));
+    this(trustedRoot(context));
+  }
+
+  private static File trustedRoot(Context context) {
+    try {
+      // Android's trusted filesDir may use the /data/user/0 -> /data/data alias.
+      // Normalize only that base: an owned qiban-chat-images symlink still fails below.
+      return new File(context.getFilesDir().getCanonicalFile(), "qiban-chat-images");
+    } catch (IOException cause) {
+      throw error("无法创建聊天图片目录", cause);
+    }
   }
 
   ChatImageStore(File root) {
-    this.root = root;
+    this.root = root.getAbsoluteFile();
+    try {
+      if (!this.root.getCanonicalFile().equals(this.root))
+        throw new IOException("Owned image root must not be a symlink");
+    } catch (IOException cause) {
+      throw error("无法创建聊天图片目录", cause);
+    }
     if (!root.isDirectory() && !root.mkdirs()) throw error("无法创建聊天图片目录");
   }
 
@@ -55,6 +71,10 @@ public final class ChatImageStore {
 
   private static IllegalArgumentException error(String text) {
     return new IllegalArgumentException(text);
+  }
+
+  private static IllegalArgumentException error(String text, Throwable cause) {
+    return new IllegalArgumentException(text, cause);
   }
 
   private static boolean validOwner(String owner) {
@@ -423,7 +443,7 @@ public final class ChatImageStore {
     } catch (IllegalArgumentException e) {
       throw e;
     } catch (Exception e) {
-      throw error("无法保存聊天图片");
+      throw error("无法保存聊天图片", e);
     } finally {
       if (temp != null) temp.delete();
     }
@@ -494,6 +514,110 @@ public final class ChatImageStore {
       throw e;
     } catch (Exception e) {
       throw error("聊天图片引用格式无效");
+    }
+  }
+
+  private static Map<String, Set<String>> referenceIndex(JSONObject history) throws Exception {
+    Map<String, Set<String>> result = new HashMap<>();
+    Iterator<String> owners = history.keys();
+    while (owners.hasNext()) {
+      String owner = owners.next();
+      Set<String> ids = new HashSet<>();
+      JSONArray messages = history.getJSONArray(owner);
+      for (int i = 0; i < messages.length(); i++) {
+        JSONObject message = messages.getJSONObject(i);
+        if (message.has("image")) ids.add(message.getJSONObject("image").getString("id"));
+      }
+      result.put(owner, ids);
+    }
+    return result;
+  }
+
+  private void rememberCommitted(Map<String, Set<String>> next) {
+    for (Map.Entry<String, Set<String>> entry : next.entrySet()) {
+      Set<String> active = drafts.get(entry.getKey());
+      if (active != null) active.removeAll(entry.getValue());
+    }
+    committed.clear();
+    committed.putAll(next);
+  }
+
+  private static boolean cancelledRead(IllegalArgumentException error) {
+    return "聊天图片读取已取消".equals(error.getMessage());
+  }
+
+  /** Missing stored images must not hide otherwise valid text or trigger orphan pruning. */
+  public synchronized boolean restoreHistory(JSONObject history) {
+    DataStore.validateHistory(history);
+    boolean healthy = true;
+    try {
+      Iterator<String> owners = history.keys();
+      while (owners.hasNext()) {
+        String owner = owners.next();
+        JSONArray messages = history.getJSONArray(owner);
+        for (int i = 0; i < messages.length(); i++) {
+          JSONObject message = messages.getJSONObject(i);
+          if (!message.has("image")) continue;
+          try {
+            resolve(owner, message.getJSONObject("image"));
+          } catch (IllegalArgumentException broken) {
+            if (cancelledRead(broken)) throw broken;
+            healthy = false;
+          }
+        }
+      }
+      if (healthy) {
+        commitHistory(history);
+        return true;
+      }
+      rememberCommitted(referenceIndex(history));
+      return false;
+    } catch (IllegalArgumentException error) {
+      throw error;
+    } catch (Exception cause) {
+      throw error("聊天图片引用格式无效", cause);
+    }
+  }
+
+  private static boolean previouslyReferenced(String owner, JSONObject image, JSONObject previous)
+      throws Exception {
+    JSONArray messages = previous.optJSONArray(owner);
+    if (messages == null) return false;
+    for (int i = 0; i < messages.length(); i++) {
+      JSONObject old = messages.getJSONObject(i);
+      if (old.has("image")
+          && sameTurn(
+              new JSONObject().put("image", image),
+              new JSONObject().put("image", old.getJSONObject("image")))) return true;
+    }
+    return false;
+  }
+
+  /** Only unchanged, same-owner persisted references may survive an unavailable file. */
+  public synchronized void validateForSave(JSONObject next, JSONObject previous) {
+    DataStore.validateHistory(next);
+    DataStore.validateHistory(previous);
+    try {
+      Iterator<String> owners = next.keys();
+      while (owners.hasNext()) {
+        String owner = owners.next();
+        JSONArray messages = next.getJSONArray(owner);
+        for (int i = 0; i < messages.length(); i++) {
+          JSONObject message = messages.getJSONObject(i);
+          if (!message.has("image")) continue;
+          JSONObject image = message.getJSONObject("image");
+          try {
+            resolve(owner, image);
+          } catch (IllegalArgumentException broken) {
+            if (cancelledRead(broken) || !previouslyReferenced(owner, image, previous))
+              throw broken;
+          }
+        }
+      }
+    } catch (IllegalArgumentException error) {
+      throw error;
+    } catch (Exception cause) {
+      throw error("聊天图片引用格式无效", cause);
     }
   }
 

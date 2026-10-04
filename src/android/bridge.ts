@@ -113,6 +113,7 @@ const sourceNames: Record<keyof CardFields, string> = {
 /** Fixed operations only; raw sources are retained separately from runtime personas. */
 export function createAndroidBridge(native: AndroidPlugin): AndroidBridge {
   const sources = new Map<string, string>();
+  const requests = new Map<string, { cancelled: boolean }>();
   let pending:
     | {
         token: string;
@@ -332,54 +333,67 @@ export function createAndroidBridge(native: AndroidPlugin): AndroidBridge {
     demo: () => native.demo(),
     deleteKey: () => native.deleteKey(),
     async deleteData() {
+      for (const request of requests.values()) request.cancelled = true;
       pending = undefined;
       sources.clear();
       return native.deleteData();
     },
     async chat(request, id) {
-      let prepared;
+      const token = { cancelled: false };
+      requests.set(id, token);
       try {
-        prepared = prepareChatContext(request);
-      } catch {
-        return failure("图片或消息格式不正确，请编辑后重试。");
-      }
-      const result = await fields(request.characterId);
-      if (!result.ok) return result;
-      const reply = await native.chat({
-        request: prepared.request,
-        persona: result.value,
-        id,
-      });
-      if (!reply.ok) return reply;
-      const reported = reply.value.omittedImageIds ?? [];
-      const originalIds = new Set(
-        request.messages.flatMap((message) =>
-          message.image ? [message.image.id] : [],
-        ),
-      );
-      if (
-        !Array.isArray(reported) ||
-        reported.length > 40 ||
-        reported.some(
-          (imageId) =>
-            typeof imageId !== "string" ||
-            !CHAT_IMAGE_ID.test(imageId) ||
-            !originalIds.has(imageId),
+        let prepared;
+        try {
+          prepared = prepareChatContext(request);
+        } catch {
+          return failure("图片或消息格式不正确，请编辑后重试。");
+        }
+        const result = await fields(request.characterId);
+        if (token.cancelled || requests.get(id) !== token)
+          return failure("已取消这次聊天。");
+        if (!result.ok) return result;
+        const reply = await native.chat({
+          request: prepared.request,
+          persona: result.value,
+          id,
+        });
+        if (token.cancelled || requests.get(id) !== token)
+          return failure("已取消这次聊天。");
+        if (!reply.ok) return reply;
+        const reported = reply.value.omittedImageIds ?? [];
+        const originalIds = new Set(
+          request.messages.flatMap((message) =>
+            message.image ? [message.image.id] : [],
+          ),
+        );
+        if (
+          !Array.isArray(reported) ||
+          reported.length > 40 ||
+          reported.some(
+            (imageId) =>
+              typeof imageId !== "string" ||
+              !CHAT_IMAGE_ID.test(imageId) ||
+              !originalIds.has(imageId),
+          )
         )
-      )
-        return failure("图片回复格式不正确，请重试。");
-      const omittedImageIds = [
-        ...new Set([...prepared.omittedImageIds, ...reported]),
-      ];
-      return {
-        ok: true,
-        value: {
-          ...reply.value,
-          ...(omittedImageIds.length ? { omittedImageIds } : {}),
-        },
-      };
+          return failure("图片回复格式不正确，请重试。");
+        const omittedImageIds = [
+          ...new Set([...prepared.omittedImageIds, ...reported]),
+        ];
+        return {
+          ok: true,
+          value: {
+            ...reply.value,
+            ...(omittedImageIds.length ? { omittedImageIds } : {}),
+          },
+        };
+      } finally {
+        if (requests.get(id) === token) requests.delete(id);
+      }
     },
     cancel(id) {
+      const token = requests.get(id);
+      if (token) token.cancelled = true;
       void native.cancel({ id }).catch(() => {});
     },
   };
