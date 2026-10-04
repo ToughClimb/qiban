@@ -119,8 +119,11 @@ export function App() {
       );
     } catch (failure) {
       if (request.current !== controller) return;
-      if (failure instanceof ChatError && failure.status === 401)
+      if (failure instanceof ChatError && failure.status === 401) {
         setAccessToken("");
+        setMode("live");
+        setConfigAttempt((value) => value + 1);
+      }
       setError(
         failure instanceof ChatError
           ? failure.message

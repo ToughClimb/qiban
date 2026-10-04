@@ -228,6 +228,45 @@ try {
   await noStorage.context.close();
   console.log("PASS storage failure: visible warning and usable chat");
 
+  const transition = await openPage();
+  let backendLive = false;
+  await transition.page.route("**/api/config", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ mode: backendLive ? "live" : "demo" }),
+    }),
+  );
+  await transition.page.route("**/api/chat", (route) => {
+    if (!backendLive) {
+      backendLive = true;
+      return route.fulfill({ status: 401, body: "{}" });
+    }
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ content: "切换后的实时回复", mode: "live" }),
+    });
+  });
+  await transition.page.goto(url);
+  await transition.page
+    .getByRole("textbox", { name: /发消息/ })
+    .fill("切换后继续聊天");
+  await transition.page.getByRole("button", { name: "发送" }).click();
+  await expect(
+    transition.page.getByLabel("输入体验口令，开始聊天"),
+  ).toBeVisible();
+  await transition.page
+    .getByLabel("输入体验口令，开始聊天")
+    .fill("synthetic-invite");
+  await transition.page.getByRole("button", { name: "进入" }).click();
+  await transition.page.getByRole("button", { name: "重试回复" }).click();
+  await expect(
+    transition.page.getByText("切换后的实时回复", { exact: true }),
+  ).toBeVisible();
+  await transition.context.close();
+  console.log(
+    "PASS demo-to-live 401: invite is shown and retry succeeds without reload",
+  );
+
   const liveUI = await openPage();
   await liveUI.page.route("**/api/config", (route) =>
     route.fulfill({

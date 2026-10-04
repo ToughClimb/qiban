@@ -1,4 +1,4 @@
-import { EnvHttpProxyAgent } from "undici";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { getCharacter, type ChatRequest } from "../shared/characters.js";
 import { personalities } from "./personas.js";
 
@@ -53,9 +53,27 @@ function demoReply({ characterId, messages }: ChatRequest): string {
   return replies[characterId];
 }
 
+export type ProviderFetch = (
+  url: string,
+  options: {
+    method: string;
+    redirect: "error";
+    signal: AbortSignal;
+    dispatcher: EnvHttpProxyAgent;
+    headers: Record<string, string>;
+    body: string;
+  },
+) => Promise<{
+  ok: boolean;
+  json(): Promise<unknown>;
+  body?: { cancel(): Promise<void> } | null;
+}>;
+// Fetch and dispatcher must come from the same Undici implementation.
+export const providerFetch: ProviderFetch = (url, options) =>
+  undiciFetch(url, options);
 export function createProvider(
   config: Config,
-  fetcher: typeof fetch = fetch,
+  fetcher: ProviderFetch = providerFetch,
 ): Provider {
   if (config.mode === "demo")
     return { reply: async (request) => demoReply(request) };

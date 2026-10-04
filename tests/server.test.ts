@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import { EnvHttpProxyAgent } from "undici";
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
@@ -7,6 +9,7 @@ import {
   LIVE_MODEL,
   MAX_OUTPUT_TOKENS,
   readConfig,
+  providerFetch,
   type Config,
   type Provider,
 } from "../server/provider.ts";
@@ -317,4 +320,35 @@ test("Chinese and JSON-escaped context are trimmed to shared UTF-8 budgets and a
       assert.equal(response.status, 200);
     }
   });
+});
+
+test("installed Undici fetch and dispatcher complete a real local HTTP request", async () => {
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests++;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ compatible: true }));
+  });
+  server.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const dispatcher = new EnvHttpProxyAgent({ noProxy: "127.0.0.1" });
+  try {
+    const response = await providerFetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(2000),
+        dispatcher,
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
+    assert.equal(response.ok, true);
+    assert.deepEqual(await response.json(), { compatible: true });
+    assert.equal(requests, 1);
+  } finally {
+    await dispatcher.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
