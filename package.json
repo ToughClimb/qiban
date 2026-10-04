@@ -8,28 +8,46 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx server/index.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.desktop.json --noEmit",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
     "start": "NODE_ENV=production node --env-file-if-exists=.env dist/server/index.js",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:ui": "node tests/ui-smoke.mjs",
-    "test:live": "node --env-file-if-exists=.env --import tsx tests/live-smoke.ts"
+    "test:live": "node --env-file-if-exists=.env --import tsx tests/live-smoke.ts",
+    "desktop:build": "npm run typecheck && node scripts/build-desktop.mjs",
+    "desktop:start": "npm run desktop:build && electron .",
+    "desktop:package": "npm run desktop:build && electron-forge package --platform=win32 --arch=x64",
+    "desktop:make": "npm run desktop:build && electron-forge make --platform=win32 --arch=x64",
+    "test:desktop": "node tests/desktop-smoke.mjs"
   },
   "dependencies": {
+    "electron-squirrel-startup": "^1.0.1",
     "express": "^5.2.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "undici": "^8.11.2"
   },
   "devDependencies": {
+    "@electron-forge/cli": "^8.0.1",
+    "@electron-forge/maker-squirrel": "^8.0.1",
+    "@electron-forge/maker-zip": "^8.0.1",
     "@playwright/test": "^1.63.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.5.1",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"
+  },
+  "main": "desktop-build/main.cjs",
+  "productName": "Qiban",
+  "author": "Qiban contributors",
+  "description": "栖伴：与原创虚拟角色和宠物聊聊日常。",
+  "config": {
+    "forge": "./forge.config.cjs"
   }
 }

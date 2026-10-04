@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import type { RefObject } from "react";
 import type { Character, Message } from "../shared/characters";
 
@@ -31,17 +32,13 @@ export function ChatMessages({
       aria-relevant="additions text"
     >
       <div className="welcome">
-        <span className={`avatar hero ${character.color}`} aria-hidden="true">
-          {character.emoji}
-        </span>
+        <Avatar character={character} size="hero" />
         <h3>和{character.name}，聊聊日常</h3>
         <p>{character.description}</p>
         <span className="welcome-label">{character.kind}</span>
       </div>
       <div className="message assistant">
-        <span className={`avatar tiny ${character.color}`} aria-hidden="true">
-          {character.emoji}
-        </span>
+        <Avatar character={character} size="tiny" />
         <div>
           <span className="message-name">{character.name}</span>
           <p className="bubble">{character.greeting}</p>
@@ -50,12 +47,7 @@ export function ChatMessages({
       {messages.map((message) => (
         <div key={message.id} className={`message ${message.role}`}>
           {message.role === "assistant" && (
-            <span
-              className={`avatar tiny ${character.color}`}
-              aria-hidden="true"
-            >
-              {character.emoji}
-            </span>
+            <Avatar character={character} size="tiny" />
           )}
           <div>
             <span className="message-name">

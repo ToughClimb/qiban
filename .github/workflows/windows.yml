@@ -1,0 +1,38 @@
+name: Windows desktop verification
+on:
+  push:
+    branches: [feat/qiban-mvp]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  desktop:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run desktop:make
+      - name: Smoke test packaged application
+        shell: pwsh
+        run: |
+          $env:QIBAN_PACKAGED_EXE = (Resolve-Path 'out/Qiban-win32-x64/Qiban.exe').Path
+          npm run test:desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Installer hashes and sizes
+        shell: pwsh
+        run: |
+          Get-ChildItem out/make -Recurse -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+            "- $($_.Name): $($_.Length) bytes; SHA256 $hash" >> $env:GITHUB_STEP_SUMMARY
+          }
+          'No installer upload, Release publication, or deployment was performed.' >> $env:GITHUB_STEP_SUMMARY

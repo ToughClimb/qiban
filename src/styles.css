@@ -703,3 +703,204 @@ textarea:focus-visible {
     transition: none !important;
   }
 }
+.avatar {
+  overflow: hidden;
+}
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.settings-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 50px);
+  overflow-y: auto;
+  border: 1px solid #dfe5d8;
+  border-radius: 24px;
+  padding: 32px;
+  background: #fffdf7;
+  color: #344339;
+  box-shadow: 0 25px 100px #1e392b35;
+}
+.settings-dialog::backdrop {
+  background: #253a2d65;
+  backdrop-filter: blur(4px);
+}
+.settings-dialog h2 {
+  font: 600 28px/1.4 serif;
+  letter-spacing: 0.5px;
+  margin: 8px 0 12px;
+}
+.settings-intro {
+  color: #6e7d6e;
+  font-size: 13px;
+  line-height: 1.9;
+  margin: 0 0 24px;
+}
+.dialog-close {
+  position: absolute;
+  right: 18px;
+  top: 17px;
+  background: transparent;
+  border: 0;
+  font-size: 26px;
+  color: #7c897a;
+  padding: 3px 8px;
+}
+.settings-dialog label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 17px 0 8px;
+}
+.settings-dialog input:not([type="checkbox"]),
+.settings-dialog select,
+.settings-dialog textarea {
+  display: block;
+  width: 100%;
+  border: 1px solid #d2dccb;
+  border-radius: 10px;
+  padding: 12px;
+  background: white;
+  color: #3e493e;
+  font-size: 14px;
+}
+.settings-dialog label.remember-key {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 400;
+  margin-top: 14px;
+}
+.remember-key input {
+  width: 16px;
+  height: 16px;
+  accent-color: #496d4f;
+}
+.field-note {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #75836f;
+  margin: 8px 0 0;
+}
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.settings-actions .send-button {
+  padding: 12px 19px;
+  font-size: 13px;
+}
+.settings-actions .quiet-button {
+  font-size: 12px;
+  padding: 11px 14px;
+}
+.local-data {
+  margin-top: 27px;
+  border-top: 1px solid #e3e8db;
+  padding-top: 19px;
+  font-size: 12px;
+  color: #6b7b68;
+}
+.local-data summary {
+  cursor: pointer;
+  color: #5f745b;
+}
+.local-data p {
+  line-height: 1.9;
+}
+.local-data code {
+  display: block;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f0f3e9;
+  word-break: break-all;
+  font-size: 11px;
+}
+.data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+.danger {
+  color: #a66447;
+}
+.diagnostics {
+  margin-top: 12px;
+  font-family: monospace;
+}
+.model-selection {
+  margin-top: 14px;
+  background: #f3f5ec;
+  padding: 1px 13px 13px;
+  border-radius: 12px;
+}
+.companions {
+  overflow: hidden;
+}
+.character-list {
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+.sidebar-intro h1 {
+  line-height: 1.5;
+}
+.character-info small {
+  font-size: 12px;
+}
+.message-name {
+  font-size: 11px;
+}
+.privacy-note {
+  font-size: 11px;
+}
+.bubble {
+  font-size: 15px;
+}
+.mode-notice {
+  font-size: 12px;
+}
+.chat-header p {
+  font-size: 12px;
+}
+.welcome-label {
+  font-size: 11px;
+}
+@media (max-width: 600px) {
+  .character-list {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .mode-notice {
+    font-size: 10px;
+  }
+  .bubble {
+    font-size: 13px;
+  }
+  .privacy-note {
+    font-size: 9px;
+  }
+  .header-actions {
+    gap: 5px;
+  }
+  .header-actions .quiet-button {
+    font-size: 10px;
+    padding: 7px 8px;
+  }
+  .settings-dialog {
+    padding: 26px 22px;
+  }
+  .settings-dialog h2 {
+    font-size: 25px;
+  }
+}

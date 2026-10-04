@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import { characters, type CharacterId } from "../shared/characters";
 
 export function CharacterPicker({
@@ -29,9 +30,7 @@ export function CharacterPicker({
             aria-pressed={selected === item.id}
             onClick={() => onChoose(item.id)}
           >
-            <span className={`avatar ${item.color}`} aria-hidden="true">
-              {item.emoji}
-            </span>
+            <Avatar character={item} />
             <span className="character-info">
               <strong>
                 {item.name}

@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   characters,
@@ -5,9 +6,16 @@ import {
   type CharacterId,
   type Message,
 } from "../shared/characters";
+import { ConnectionPanel } from "./ConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
-import { ChatError, sendMessage, type Mode } from "./api";
+import {
+  ChatError,
+  sendMessage,
+  readMode,
+  desktopBridge,
+  type Mode,
+} from "./api";
 import {
   readConversations,
   replaceConversation,
@@ -24,8 +32,13 @@ function loadSaved(): Conversations {
   }
 }
 export function App() {
+  const desktop = desktopBridge();
+  const [storageReady, setStorageReady] = useState(!desktop);
+  const [deletingData, setDeletingData] = useState(false);
   const [selected, setSelected] = useState<CharacterId>("lin");
-  const [conversations, setConversations] = useState(loadSaved);
+  const [conversations, setConversations] = useState(() =>
+    desktop ? {} : loadSaved(),
+  );
   const [drafts, setDrafts] = useState<Partial<Record<CharacterId, string>>>(
     {},
   );
@@ -44,19 +57,14 @@ export function App() {
   const messages = conversations[selected] ?? [];
   const draft = drafts[selected] ?? "";
   const unanswered = messages.at(-1)?.role === "user";
-  const locked = mode === "live" && !accessToken;
+  const locked = !desktop && mode === "live" && !accessToken;
 
   useEffect(() => {
     const controller = new AbortController();
     setConfigError(false);
-    fetch("/api/config", {
-      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error();
-        const data = await response.json();
-        if (data.mode !== "demo" && data.mode !== "live") throw new Error();
-        if (!controller.signal.aborted) setMode(data.mode);
+    readMode(AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]))
+      .then((value) => {
+        if (!controller.signal.aborted) setMode(value);
       })
       .catch(() => {
         if (!controller.signal.aborted) setConfigError(true);
@@ -64,12 +72,42 @@ export function App() {
     return () => controller.abort();
   }, [configAttempt]);
   useEffect(() => {
+    if (!desktop) return;
+    let cancelled = false;
+    desktop
+      .loadHistory()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setConversations(result.value);
+          setStorageReady(true);
+        } else {
+          setStorageError(true);
+          setError(result.error);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStorageError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (!storageReady || deletingData) return;
+    if (desktop) {
+      desktop
+        .saveHistory(conversations)
+        .then((result) => setStorageError(!result.ok))
+        .catch(() => setStorageError(true));
+      return;
+    }
     try {
       setStorageError(!writeConversations(localStorage, conversations));
     } catch {
       setStorageError(true);
     }
-  }, [conversations]);
+  }, [conversations, storageReady, deletingData]);
   useEffect(() => {
     scrollArea.current?.scrollTo({
       top: scrollArea.current.scrollHeight,
@@ -90,7 +128,7 @@ export function App() {
     setError("");
   }
   async function reply(history: Message[]) {
-    if (request.current || !mode || locked) return;
+    if (request.current || !mode || locked || !storageReady) return;
     const controller = new AbortController();
     request.current = controller;
     setBusy(true);
@@ -145,6 +183,7 @@ export function App() {
       busy ||
       unanswered ||
       !mode ||
+      !storageReady ||
       locked
     )
       return;
@@ -188,12 +227,7 @@ export function App() {
       <main className="chat-panel">
         <header className="chat-header">
           <div className="chat-identity">
-            <span
-              className={`avatar small ${character.color}`}
-              aria-hidden="true"
-            >
-              {character.emoji}
-            </span>
+            <Avatar character={character} size="small" />
             <div>
               <h2>{character.name}</h2>
               <p>
@@ -201,14 +235,35 @@ export function App() {
               </p>
             </div>
           </div>
-          <button
-            className="quiet-button"
-            type="button"
-            onClick={reset}
-            disabled={!messages.length}
-          >
-            清空聊天
-          </button>
+          <div className="header-actions">
+            {desktop && (
+              <ConnectionPanel
+                onChanged={(value) => {
+                  cancelRequest();
+                  setMode(value);
+                  setConfigAttempt((attempt) => attempt + 1);
+                }}
+                onDeleteData={async () => {
+                  cancelRequest();
+                  setDeletingData(true);
+                  const result = await desktop.deleteData();
+                  if (!result.ok) {
+                    setDeletingData(false);
+                    throw new Error(result.error);
+                  }
+                  window.location.reload();
+                }}
+              />
+            )}
+            <button
+              className="quiet-button"
+              type="button"
+              onClick={reset}
+              disabled={!messages.length}
+            >
+              清空聊天
+            </button>
+          </div>
         </header>
         <div
           className={`mode-notice ${mode === "live" ? "live-notice" : ""}`}
@@ -311,7 +366,7 @@ export function App() {
                   [selected]: event.target.value,
                 }))
               }
-              disabled={busy || unanswered || locked || !mode}
+              disabled={busy || unanswered || locked || !mode || !storageReady}
               onKeyDown={(event) => {
                 if (
                   event.key === "Enter" &&
@@ -333,7 +388,12 @@ export function App() {
                 className="send-button"
                 type="submit"
                 disabled={
-                  !draft.trim() || busy || unanswered || locked || !mode
+                  !draft.trim() ||
+                  busy ||
+                  unanswered ||
+                  locked ||
+                  !mode ||
+                  !storageReady
                 }
               >
                 发送 <span aria-hidden="true">↑</span>
@@ -346,9 +406,13 @@ export function App() {
           >
             {storageError
               ? "浏览器无法保存记录；关闭页面后，本次聊天可能丢失。"
-              : mode === "live"
-                ? "记录保存在此浏览器；发送时，近期对话会交给 AI 服务处理。"
-                : "记录只保存在此浏览器，可随时清空。演示聊天不会发给 AI 服务。"}
+              : desktop
+                ? mode === "live"
+                  ? "记录仅保存在本机；近期聊天会发送至你设置的 AI 服务。"
+                  : "记录仅保存在本机。演示聊天不会发给 AI 服务。"
+                : mode === "live"
+                  ? "记录保存在此浏览器；发送时，近期对话会交给 AI 服务处理。"
+                  : "记录只保存在此浏览器，可随时清空。演示聊天不会发给 AI 服务。"}
           </p>
         </div>
       </main>

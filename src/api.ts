@@ -1,3 +1,4 @@
+import type { DesktopBridge } from "../shared/desktop";
 import {
   MAX_MESSAGE_LENGTH,
   type Mode,
@@ -7,6 +8,23 @@ import {
 import { fitsChatBudget, trimChatContext } from "../shared/chat";
 export type { Mode } from "../shared/characters";
 export type ChatReply = { content: string; mode: Mode };
+export function desktopBridge(): DesktopBridge | undefined {
+  return typeof window === "undefined" ? undefined : window.qiban;
+}
+export async function readMode(signal: AbortSignal): Promise<Mode> {
+  const bridge = desktopBridge();
+  if (bridge) {
+    const result = await bridge.status();
+    if (!result.ok) throw new ChatError(result.error);
+    return result.value.mode;
+  }
+  const response = await fetch("/api/config", { signal });
+  if (!response.ok) throw new ChatError("暂时连接不上栖伴。");
+  const data = await response.json();
+  if (data.mode !== "demo" && data.mode !== "live")
+    throw new ChatError("连接信息未能读取。");
+  return data.mode;
+}
 export class ChatError extends Error {
   constructor(
     message: string,
@@ -30,6 +48,20 @@ export async function sendMessage(
     (request.messages.at(-1)?.content.length ?? 0) > MAX_MESSAGE_LENGTH
   ) {
     throw new ChatError("消息太长，请编辑这条消息后再发送。", 413);
+  }
+  const bridge = desktopBridge();
+  if (bridge) {
+    if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    const id = crypto.randomUUID();
+    const onAbort = () => bridge.cancel(id);
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      const result = await bridge.chat(request, id);
+      if (!result.ok) throw new ChatError(result.error);
+      return result.value;
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
   }
   const response = await fetch("/api/chat", {
     method: "POST",
