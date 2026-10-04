@@ -127,22 +127,10 @@ public final class NativeImageChatSmokeTest {
               + JSONObject.quote(preview)
               + ";'started'");
       assertEquals("loaded", settled(scenario));
-      JSONObject turn =
-          new JSONObject()
-              .put("id", "synthetic-user-image")
-              .put("role", "user")
-              .put("content", "")
-              .put("image", image);
-      JSONObject history = new JSONObject().put("lin", new JSONArray().put(turn));
-      nativeCall(scenario, "saveHistory", new JSONObject().put("history", history));
+      // A concurrent empty-history save must preserve the active, not-yet-sent draft.
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", new JSONObject()));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
-      nativeCall(scenario, "loadHistory", new JSONObject());
-      JSONObject loaded = new JSONObject(settled(scenario));
-      assertTrue(loaded.getBoolean("ok"));
-      String persisted = loaded.getJSONObject("value").toString();
-      assertTrue(persisted.contains(imageId));
-      assertFalse(persisted.contains("data:image"));
-      assertFalse(persisted.contains("previewUrl"));
+      assertNotNull(store.preview("lin", imageId));
       JSONObject request =
           new JSONObject()
               .put("characterId", "lin")
@@ -179,28 +167,126 @@ public final class NativeImageChatSmokeTest {
       assertFalse(prepared.body.toString().contains(imageId));
       assertEquals(0, prepared.omittedImageIds.length());
       assertEquals("demo", connection.status().getString("mode"));
+      // A newly selected draft resolves before the asynchronous history save effect.
+      JSONObject wrongOwner = new JSONObject(request.toString()).put("characterId", "tao");
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              ConnectionService.prepareImageModelRequest(
+                  wrongOwner,
+                  persona,
+                  "deepseek-flash",
+                  true,
+                  store::resolve,
+                  new NativeHttp.Cancellation()));
+      JSONObject turn =
+          new JSONObject()
+              .put("id", "synthetic-user-image")
+              .put("role", "user")
+              .put("content", "")
+              .put("image", image);
+      JSONObject history = new JSONObject().put("lin", new JSONArray().put(turn));
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", history));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      nativeCall(scenario, "loadHistory", new JSONObject());
+      JSONObject loaded = new JSONObject(settled(scenario));
+      assertTrue(loaded.getBoolean("ok"));
+      String persisted = loaded.getJSONObject("value").toString();
+      assertTrue(persisted.contains(imageId));
+      assertFalse(persisted.contains("data:image"));
+      assertFalse(persisted.contains("previewUrl"));
+      // Recreate the actual Activity: image-only history and references survive for retry.
+      scenario.recreate();
+      NativeOriginStorageSmokeTest.awaitAndroidSettings(scenario);
+      QibanPlugin[] restartedHolder = new QibanPlugin[1];
+      scenario.onActivity(
+          activity ->
+              restartedHolder[0] =
+                  (QibanPlugin) activity.getBridge().getPlugin("Qiban").getInstance());
+      QibanPlugin restartedPlugin = restartedHolder[0];
+      ChatImageStore restartedStore = (ChatImageStore) field(restartedPlugin, "chatImages");
+      assertNotNull(restartedStore.preview("lin", imageId));
+      nativeCall(scenario, "loadHistory", new JSONObject());
+      JSONObject reloaded = new JSONObject(settled(scenario));
+      JSONObject imageOnly = reloaded.getJSONObject("value").getJSONArray("lin").getJSONObject(0);
+      assertEquals("", imageOnly.getString("content"));
+      assertEquals(imageId, imageOnly.getJSONObject("image").getString("id"));
+      JSONObject retry =
+          new JSONObject()
+              .put("characterId", "lin")
+              .put(
+                  "messages",
+                  new JSONArray()
+                      .put(
+                          new JSONObject()
+                              .put("role", "user")
+                              .put("content", "")
+                              .put("image", imageOnly.getJSONObject("image"))));
+      ConnectionService.PreparedImageRequest retried =
+          ConnectionService.prepareImageModelRequest(
+              retry,
+              persona,
+              "deepseek-flash",
+              true,
+              restartedStore::resolve,
+              new NativeHttp.Cancellation());
+      JSONArray retryParts =
+          retried.body.getJSONArray("messages").getJSONObject(3).getJSONArray("content");
+      assertEquals("", retryParts.getJSONObject(0).getString("text"));
+      assertEquals(
+          preview, retryParts.getJSONObject(1).getJSONObject("image_url").getString("url"));
       // Discard protects a committed reference; reset removes it and invalidates an old picker.
       nativeCall(
           scenario,
           "discardChatImage",
           new JSONObject().put("characterId", "lin").put("imageId", imageId));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
-      assertNotNull(store.preview("lin", imageId));
-      long oldGeneration = store.generation("lin");
+      assertNotNull(restartedStore.preview("lin", imageId));
+      long oldGeneration = restartedStore.generation("lin");
       nativeCall(scenario, "saveHistory", new JSONObject().put("history", new JSONObject()));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
-      assertNull(store.preview("lin", imageId));
+      assertNull(restartedStore.preview("lin", imageId));
       assertFalse(
-          pickerResult(plugin, store, oldGeneration, Activity.RESULT_OK).result.getBoolean("ok"));
+          pickerResult(restartedPlugin, restartedStore, oldGeneration, Activity.RESULT_OK)
+              .result
+              .getBoolean("ok"));
       RecordingCall fresh =
-          pickerResult(plugin, store, store.generation("lin"), Activity.RESULT_OK);
+          pickerResult(
+              restartedPlugin,
+              restartedStore,
+              restartedStore.generation("lin"),
+              Activity.RESULT_OK);
       String draftId = fresh.result.getJSONObject("value").getJSONObject("image").getString("id");
       nativeCall(
           scenario,
           "discardChatImage",
           new JSONObject().put("characterId", "lin").put("imageId", draftId));
       assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
-      assertNull(store.preview("lin", draftId));
+      assertNull(restartedStore.preview("lin", draftId));
+      RecordingCall edited =
+          pickerResult(
+              restartedPlugin,
+              restartedStore,
+              restartedStore.generation("lin"),
+              Activity.RESULT_OK);
+      JSONObject editedImage = edited.result.getJSONObject("value").getJSONObject("image");
+      JSONObject editedTurn =
+          new JSONObject()
+              .put("id", "synthetic-edited-image")
+              .put("role", "user")
+              .put("content", "保留文字")
+              .put("image", editedImage);
+      JSONObject editedHistory = new JSONObject().put("lin", new JSONArray().put(editedTurn));
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", editedHistory));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      editedTurn.remove("image");
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", editedHistory));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      assertNull(restartedStore.preview("lin", editedImage.getString("id")));
+      assertThrows(
+          IllegalArgumentException.class, () -> restartedStore.resolve("lin", editedImage));
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", new JSONObject()));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
     }
   }
 }
