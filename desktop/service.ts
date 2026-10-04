@@ -4,9 +4,9 @@ import { modelRequest, prepareImageModelRequest, finalText, LIVE_MODEL } from ".
 import type { ChatImageResolver } from "../server/image-chat.js";
 import { prepareChatContext } from "../shared/chat.js";
 import type { Conversations } from "../shared/history.js";
-import { conversationInterrupted } from "./history.js";
+import { conversationInterrupted, requestHistoryBasis, requestBasisInterrupted } from "./history.js";
 import { parseChat } from "../server/validation.js";
-import type { ChatRequest } from "../shared/characters.js";
+import type { ChatRequest, Message } from "../shared/characters.js";
 import {
   DEFAULT_API_URL,
   type ConnectionInput,
@@ -28,6 +28,8 @@ export class DesktopService {
   private connection: SavedConnection;
   private active = new Map<string, AbortController>();
   private activeCharacter?: string;
+  private activeInput?: ChatRequest;
+  private activeHistoryBasis?: Message[];
   private configuring = false;
   private setupAbort?: AbortController;
   constructor(
@@ -187,8 +189,20 @@ export class DesktopService {
     if (this.activeCharacter === characterId) this.cancelAll();
   }
   historySaved(previous: Conversations, saved: Conversations) {
-    for (const owner of Object.keys(previous))
-      if (conversationInterrupted(previous[owner], saved[owner])) this.cancelCharacter(owner);
+    const owner = this.activeCharacter;
+    const input = this.activeInput;
+    if (!owner || !input) return;
+    // A retry may already have a saved pending user turn. A new Send after a
+    // completed reply is not bound to an older coincidentally identical turn.
+    if (!this.activeHistoryBasis && previous[owner]?.at(-1)?.role === "user")
+      this.activeHistoryBasis = requestHistoryBasis(input, previous[owner]);
+    if (this.activeHistoryBasis) {
+      if (requestBasisInterrupted(this.activeHistoryBasis, saved[owner])) this.cancelCharacter(owner);
+      return;
+    }
+    if (saved[owner]?.at(-1)?.role === "user")
+      this.activeHistoryBasis = requestHistoryBasis(input, saved[owner]);
+    if (!this.activeHistoryBasis && conversationInterrupted(previous[owner], saved[owner])) this.cancelCharacter(owner);
   }
   async chat(value: ChatRequest, id: string) {
     let prepared;
@@ -218,6 +232,8 @@ export class DesktopService {
     const controller = new AbortController();
     this.active.set(id, controller);
     this.activeCharacter = request.characterId;
+    this.activeInput = structuredClone(request);
+    this.activeHistoryBasis = undefined;
     const { key, baseUrl, model } = this.connection;
     try {
       const endpoint = normalizeEndpoint(baseUrl);
@@ -265,6 +281,8 @@ export class DesktopService {
     } finally {
       this.active.delete(id);
       this.activeCharacter = undefined;
+      this.activeInput = undefined;
+      this.activeHistoryBasis = undefined;
     }
   }
 }

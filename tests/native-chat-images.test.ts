@@ -218,3 +218,73 @@ test("identity-based reset/tail removal/edit still cancels replies and clears dr
   images.reconcile({}, replacement); assert.equal(images.preview("lin", pendingDraft.image.id), null);
   assert.equal(images.preview("lin", draft.image.id), null);
 });
+for (const withImage of [false, true]) test(`editing a failed image turn to ${withImage ? "a new image" : "text"} keeps its replacement request through the delayed history save`, async t => {
+  const { directory, source, images } = fixture(t);
+  const history = new HistoryStore(directory);
+  const original = await images.import("lin", source, async () => png);
+  const previous: Conversations = { lin: [{ id: "pending-user", role: "user", content: "original failed turn", image: original.image }] };
+  history.save(previous); images.reconcile(previous);
+  const store = new ConnectionStore(directory, { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" });
+  let failing = true, posts = 0;
+  let finish!: (value: unknown) => void, transportEntered!: () => void;
+  const transportReady = new Promise<void>(accept => { transportEntered = accept; });
+  let signal!: AbortSignal;
+  let releaseResolution!: () => void, resolutionEntered!: () => void;
+  const resolutionReady = new Promise<void>(accept => { resolutionEntered = accept; });
+  const resolutionGate = new Promise<void>(accept => { releaseResolution = accept; });
+  const service = new DesktopService(store, async (_url, _key, body, abort) => {
+    if (!body) return { data: [{ id: "deepseek-flash" }] };
+    posts++;
+    if (failing) throw new Error("Synthetic failed provider request");
+    signal = abort!; transportEntered(); return new Promise(resolve => { finish = resolve; });
+  }, undefined, async (attachment, owner, abort) => {
+    if (!failing) { signal = abort!; resolutionEntered(); await resolutionGate; }
+    return images.resolve(attachment, owner, abort);
+  });
+  await service.connect({ baseUrl: "https://provider.example", apiKey: "synthetic-fixture-key", remember: false });
+  await assert.rejects(service.chat({ characterId: "lin", messages: [{ role: "user", content: "original failed turn", image: original.image }] }, "failed-original"));
+  failing = false;
+  const replacementImage = withImage ? await images.import("lin", source, async () => png) : undefined;
+  const edited = { id: "pending-user", role: "user" as const, content: "edited replacement", ...(replacementImage ? { image: replacementImage.image } : {}) };
+  const replacement: Conversations = { lin: [edited] };
+  const input = { characterId: "lin", messages: [{ role: "user" as const, content: edited.content, ...(replacementImage ? { image: replacementImage.image } : {}) }] };
+  const pending = service.chat(input, "replacement-send");
+  if (withImage) await resolutionReady; else await transportReady;
+  history.save(replacement); const saved = history.load(); service.historySaved(previous, saved); images.reconcile(saved, previous);
+  assert.equal(signal.aborted, false); assert.equal(images.preview("lin", original.image.id), null);
+  if (replacementImage) assert.ok(images.preview("lin", replacementImage.image.id));
+  releaseResolution(); await transportReady;
+  finish({ choices: [{ message: { content: "edited reply" } }] });
+  assert.equal((await pending).content, "edited reply"); assert.equal(posts, 2);
+  const completed = { lin: [...saved.lin!, { id: "replacement-reply", role: "assistant" as const, content: "edited reply" }] };
+  history.save(completed); images.reconcile(completed, saved);
+  const restarted = new ChatImageStore(directory); restarted.reconcile(history.load());
+  if (replacementImage) assert.ok(restarted.preview("lin", replacementImage.image.id));
+  else assert.equal(history.load().lin![0].image, undefined);
+});
+test("bound active input still cancels on reset, input edit, removal, and identical-text replacement with a different history ID", async t => {
+  const { directory } = fixture(t);
+  const store = new ConnectionStore(directory, { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" });
+  let finish!: (value: unknown) => void, signal!: AbortSignal;
+  const service = new DesktopService(store, async (_url, _key, body, abort) => {
+    if (!body) return { data: [{ id: "deepseek-flash" }] };
+    signal = abort!; return new Promise(resolve => { finish = resolve; });
+  });
+  await service.connect({ baseUrl: "https://provider.example", apiKey: "synthetic-fixture-key", remember: false });
+  const basis: Conversations = { lin: [{ id: "active-user", role: "user", content: "actual input" }] };
+  for (const saved of [{}, { lin: [] }, { lin: [{ ...basis.lin![0], content: "edited" }] }, { lin: [{ ...basis.lin![0], id: "different-user" }] }]) {
+    const pending = service.chat({ characterId: "lin", messages: [{ role: "user", content: "actual input" }] }, "basis-send");
+    service.historySaved({}, basis); assert.equal(signal.aborted, false);
+    service.historySaved(basis, saved); assert.equal(signal.aborted, true);
+    finish({ choices: [{ message: { content: "late" } }] }); await assert.rejects(pending, /取消/);
+  }
+  // A completed older turn with identical text cannot become a new Send's
+  // history identity before the new pending user turn has been persisted.
+  const completed: Conversations = { lin: [...basis.lin!, { id: "old-reply", role: "assistant", content: "reply" }] };
+  const appended: Conversations = { lin: [...completed.lin!, { id: "new-user", role: "user", content: "actual input" }] };
+  const pending = service.chat({ characterId: "lin", messages: [{ role: "user", content: "actual input" }] }, "repeat-send");
+  service.historySaved(completed, completed); assert.equal(signal.aborted, false);
+  service.historySaved(completed, appended); assert.equal(signal.aborted, false);
+  service.historySaved(appended, completed); assert.equal(signal.aborted, true);
+  finish({ choices: [{ message: { content: "late" } }] }); await assert.rejects(pending, /取消/);
+});
