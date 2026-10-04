@@ -333,3 +333,61 @@ test("Android bridge refuses renderer credentials and excludes invalid cards", a
   );
   assert.equal(cards.value.issues.length, 1);
 });
+
+test("Android cancellation during custom persona lookup never sends an image request", async () => {
+  const f = fixture();
+  let finishLookup!: (
+    value: Awaited<ReturnType<AndroidPlugin["listCards"]>>,
+  ) => void;
+  let sends = 0;
+  let cancelled = "";
+  f.native.listCards = () =>
+    new Promise((resolve) => {
+      finishLookup = resolve;
+    });
+  f.native.cancel = async ({ id }) => {
+    cancelled = id;
+    return ok(undefined);
+  };
+  f.native.chat = async () => {
+    sends++;
+    return ok({ content: "late", mode: "live" });
+  };
+  const reply = f.bridge.chat(
+    {
+      characterId: id,
+      messages: [{ role: "user", content: "", image: chatImage(1) }],
+    },
+    "lookup-cancel",
+  );
+  assert.equal(typeof finishLookup, "function");
+  f.bridge.cancel("lookup-cancel");
+  finishLookup(ok({ cards: [{ id, raw: original }], issues: [] }));
+  assert.deepEqual(await reply, { ok: false, error: "已取消这次聊天。" });
+  assert.equal(cancelled, "lookup-cancel");
+  assert.equal(sends, 0);
+});
+
+test("Android cancellation suppresses a native reply already in flight", async () => {
+  const f = fixture();
+  let finishChat!: (value: Awaited<ReturnType<AndroidPlugin["chat"]>>) => void;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  f.native.cancel = async () => ok(undefined);
+  f.native.chat = () => {
+    started();
+    return new Promise((resolve) => {
+      finishChat = resolve;
+    });
+  };
+  const reply = f.bridge.chat(
+    { characterId: "lin", messages: [{ role: "user", content: "测试" }] },
+    "in-flight-cancel",
+  );
+  await ready;
+  f.bridge.cancel("in-flight-cancel");
+  finishChat(ok({ content: "late", mode: "live" }));
+  assert.deepEqual(await reply, { ok: false, error: "已取消这次聊天。" });
+});

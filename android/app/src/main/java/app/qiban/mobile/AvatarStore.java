@@ -24,12 +24,36 @@ public final class AvatarStore {
   private final File directory;
 
   public AvatarStore(Context context) {
-    this(new File(context.getFilesDir(), "qiban-avatars"));
+    this(contextDirectory(context));
   }
 
   AvatarStore(File directory) {
-    this.directory = directory;
-    if (!directory.isDirectory() && !directory.mkdirs()) throw error("无法创建头像目录");
+    this.directory = directory.getAbsoluteFile();
+    try {
+      // Only Context's trusted base is canonicalized. Owned aliases remain forbidden.
+      if (!this.directory.getCanonicalFile().equals(this.directory)) throw new IOException();
+      if (!this.directory.isDirectory() && !this.directory.mkdirs()) throw new IOException();
+      requireDirectory();
+    } catch (Exception failure) {
+      throw error("无法创建头像目录");
+    }
+  }
+
+  private static File contextDirectory(Context context) {
+    try {
+      return new File(context.getFilesDir().getCanonicalFile(), "qiban-avatars");
+    } catch (IOException failure) {
+      throw error("无法创建头像目录");
+    }
+  }
+
+  private void requireDirectory() {
+    try {
+      if (!directory.isDirectory() || !directory.getCanonicalFile().equals(directory))
+        throw new IOException();
+    } catch (IOException failure) {
+      throw error("无法读取头像");
+    }
   }
 
   private static IllegalArgumentException error(String message) {
@@ -43,6 +67,7 @@ public final class AvatarStore {
   }
 
   private File image(String id) {
+    requireDirectory();
     if (!validId(id)) throw error("头像角色标识无效");
     return new File(directory, id + ".png");
   }
@@ -168,6 +193,7 @@ public final class AvatarStore {
   }
 
   private byte[] read(File file) throws IOException {
+    requireDirectory();
     if (!file.isFile()
         || !file.getCanonicalFile().equals(file.getAbsoluteFile())
         || file.length() > PNG_BYTES) throw new IOException();
@@ -186,6 +212,7 @@ public final class AvatarStore {
   }
 
   private void atomic(File target, byte[] bytes) throws IOException {
+    requireDirectory();
     File temp = File.createTempFile("pending-", ".tmp", directory);
     try {
       try (FileOutputStream out = new FileOutputStream(temp)) {
@@ -240,6 +267,7 @@ public final class AvatarStore {
   }
 
   public synchronized JSONObject list() {
+    requireDirectory();
     JSONObject result = new JSONObject();
     File[] files = directory.listFiles();
     if (files == null) throw error("无法读取头像");
@@ -277,6 +305,7 @@ public final class AvatarStore {
   }
 
   public synchronized void deleteAll() {
+    requireDirectory();
     File[] files = directory.listFiles();
     if (files == null) throw error("无法读取头像");
     for (File file : files) {

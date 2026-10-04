@@ -2,6 +2,8 @@ package app.qiban.mobile;
 
 import static org.junit.Assert.*;
 
+import android.content.Context;
+import android.content.ContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -15,6 +17,7 @@ import java.util.UUID;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.GraphicsMode;
 
@@ -29,6 +32,18 @@ public class AvatarStoreTest {
     assertTrue(bitmap.compress(format, 90, out));
     bitmap.recycle();
     return out.toByteArray();
+  }
+
+  private static Context aliasedFilesDir() throws Exception {
+    java.nio.file.Path base = Files.createTempDirectory("qiban-trusted-base-alias");
+    java.nio.file.Path actual = Files.createDirectory(base.resolve("actual"));
+    File alias = Files.createSymbolicLink(base.resolve("files-alias"), actual).toFile();
+    return new ContextWrapper(RuntimeEnvironment.getApplication()) {
+      @Override
+      public File getFilesDir() {
+        return alias;
+      }
+    };
   }
 
   @Test
@@ -149,5 +164,66 @@ public class AvatarStoreTest {
     long total = 0;
     for (File file : directory.listFiles()) total += file.length();
     assertTrue(total <= AvatarStore.TOTAL_BYTES);
+  }
+
+  @Test
+  public void trustedContextFilesDirAliasCanImportAndListExistingAvatars() throws Exception {
+    Context context = aliasedFilesDir();
+    AvatarStore store = new AvatarStore(context);
+    String first = store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG, Color.BLUE));
+    assertEquals(first, store.list().getString("lin"));
+    String next = store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG, Color.RED));
+    assertEquals(next, new AvatarStore(context).list().getString("lin"));
+    assertTrue(
+        new File(context.getFilesDir().getCanonicalFile(), "qiban-avatars/lin.png").isFile());
+    assertTrue(
+        new File(context.getFilesDir().getCanonicalFile(), "qiban-avatars/lin.bak").isFile());
+  }
+
+  @Test
+  public void trustedBaseAliasDoesNotNormalizeOwnedAvatarDirectoryOrImageAliases()
+      throws Exception {
+    Context context = aliasedFilesDir();
+    File base = context.getFilesDir().getCanonicalFile();
+    java.nio.file.Path outside = Files.createTempDirectory("qiban-outside-avatar");
+    File owned = new File(base, "qiban-avatars");
+    Files.createSymbolicLink(owned.toPath(), outside);
+    assertThrows(IllegalArgumentException.class, () -> new AvatarStore(context));
+    Files.delete(owned.toPath());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AvatarStore(new File(context.getFilesDir(), "qiban-avatars")));
+    AvatarStore store = new AvatarStore(context);
+    byte[] source = picture(10, 10, Bitmap.CompressFormat.PNG, Color.BLUE);
+    java.nio.file.Path preserved = outside.resolve("source.png");
+    Files.write(preserved, source);
+    Files.createSymbolicLink(new File(owned, "lin.png").toPath(), preserved);
+    assertEquals(0, store.list().length());
+    assertThrows(IllegalArgumentException.class, () -> store.importImage("lin", source));
+    assertArrayEquals(source, Files.readAllBytes(preserved));
+    store.importImage("tao", source);
+    Files.createSymbolicLink(new File(owned, "tao.bak").toPath(), preserved);
+    assertThrows(IllegalArgumentException.class, () -> store.importImage("tao", source));
+    assertArrayEquals(source, Files.readAllBytes(preserved));
+  }
+
+  @Test
+  public void replacingOwnedAvatarDirectoryWithLinkCannotWriteOrDeleteOutside() throws Exception {
+    Context context = aliasedFilesDir();
+    File base = context.getFilesDir().getCanonicalFile();
+    AvatarStore store = new AvatarStore(context);
+    java.nio.file.Path owned = new File(base, "qiban-avatars").toPath();
+    Files.move(owned, new File(base, "original-avatars").toPath());
+    java.nio.file.Path outside = Files.createTempDirectory("qiban-outside-avatar-swap");
+    java.nio.file.Path preserved = outside.resolve("lin.png");
+    byte[] source = picture(10, 10, Bitmap.CompressFormat.PNG, Color.BLUE);
+    Files.write(preserved, source);
+    Files.createSymbolicLink(owned, outside);
+    assertThrows(IllegalArgumentException.class, store::list);
+    assertThrows(IllegalArgumentException.class, () -> store.importImage("lin", source));
+    assertThrows(IllegalArgumentException.class, () -> store.delete("lin"));
+    assertThrows(IllegalArgumentException.class, store::deleteAll);
+    assertArrayEquals(source, Files.readAllBytes(preserved));
+    assertEquals(1, outside.toFile().listFiles().length);
   }
 }

@@ -2,6 +2,7 @@ package app.qiban.mobile;
 
 import static org.junit.Assert.*;
 
+import android.content.ContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.media.ExifInterface;
@@ -18,6 +19,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.GraphicsMode;
 
@@ -368,5 +370,181 @@ public class ChatImageStoreTest {
             previous,
             new JSONArray().put(new JSONObject(candidate.toString()).put("image", changedImage))));
     assertTrue(ChatImageStore.tailRemovedOrChanged(previous, new JSONArray()));
+  }
+
+  @Test
+  public void trustedContextFilesDirectoryAliasSupportsImportResolveAndPreview() throws Exception {
+    File parent = Files.createTempDirectory("qiban-image-context-alias").toFile();
+    File real = new File(parent, "real-files");
+    assertTrue(real.mkdir());
+    File alias = new File(parent, "alias-files");
+    Files.createSymbolicLink(alias.toPath(), real.toPath());
+    ContextWrapper context =
+        new ContextWrapper(RuntimeEnvironment.getApplication()) {
+          @Override
+          public File getFilesDir() {
+            return alias;
+          }
+        };
+    ChatImageStore store = new ChatImageStore(context);
+    JSONObject draft = store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG));
+    JSONObject image = draft.getJSONObject("image");
+    assertNotNull(store.resolve("lin", image));
+    assertEquals(draft.getString("previewUrl"), store.preview("lin", image.getString("id")));
+    assertTrue(new File(real, "qiban-chat-images/lin/" + image.getString("id") + ".jpg").isFile());
+  }
+
+  @Test
+  public void ownedRootAndOwnerSymlinksRemainRejected() throws Exception {
+    File parent = Files.createTempDirectory("qiban-image-owned-links").toFile();
+    File base = new File(parent, "files");
+    assertTrue(base.mkdir());
+    File outside = new File(parent, "outside");
+    assertTrue(outside.mkdir());
+    File ownedRoot = new File(base, "qiban-chat-images");
+    Files.createSymbolicLink(ownedRoot.toPath(), outside.toPath());
+    ContextWrapper context =
+        new ContextWrapper(RuntimeEnvironment.getApplication()) {
+          @Override
+          public File getFilesDir() {
+            return base;
+          }
+        };
+    try {
+      new ChatImageStore(context);
+      fail("owned root link must not be trusted");
+    } catch (IllegalArgumentException expected) {
+      assertNotNull(expected.getCause());
+    }
+    try {
+      new ChatImageStore(ownedRoot);
+      fail("file constructor must reject owned root link");
+    } catch (IllegalArgumentException expected) {
+      assertNotNull(expected.getCause());
+    }
+    Files.delete(ownedRoot.toPath());
+    ChatImageStore store = new ChatImageStore(context);
+    Files.createSymbolicLink(new File(ownedRoot, "lin").toPath(), outside.toPath());
+    try {
+      store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG));
+      fail("owner link must not be trusted");
+    } catch (IllegalArgumentException expected) {
+      assertEquals("无法保存聊天图片", expected.getMessage());
+      assertNotNull(expected.getCause());
+    }
+    assertEquals(0, outside.listFiles().length);
+  }
+
+  @Test
+  public void ownedImageSymlinkCannotResolveOrPreviewOutsideBytes() throws Exception {
+    File parent = Files.createTempDirectory("qiban-image-file-link").toFile();
+    ChatImageStore store = new ChatImageStore(new File(parent, "owned"));
+    JSONObject image =
+        store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG)).getJSONObject("image");
+    File saved = new File(parent, "owned/lin/" + image.getString("id") + ".jpg"),
+        outside = new File(parent, "outside.jpg");
+    Files.move(saved.toPath(), outside.toPath());
+    Files.createSymbolicLink(saved.toPath(), outside.toPath());
+    try {
+      store.resolve("lin", image);
+      fail("image link must not expose outside bytes");
+    } catch (IllegalArgumentException expected) {
+    }
+    assertNull(store.preview("lin", image.getString("id")));
+    store.deleteConversation("lin");
+    assertTrue(outside.exists());
+    assertFalse(Files.exists(saved.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+  }
+
+  @Test
+  public void missingImageRestorePreservesTextUsableConversationAndOrphans() throws Exception {
+    File directory = Files.createTempDirectory("qiban-image-partial-restore").toFile();
+    ChatImageStore store = new ChatImageStore(directory);
+    JSONObject
+        missing =
+            store
+                .importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG))
+                .getJSONObject("image"),
+        usable =
+            store
+                .importImage("tao", picture(10, 10, Bitmap.CompressFormat.PNG))
+                .getJSONObject("image");
+    JSONObject persisted = history("lin", missing);
+    persisted.getJSONArray("lin").getJSONObject(0).put("content", "keep this text");
+    persisted
+        .getJSONArray("lin")
+        .put(
+            new JSONObject()
+                .put("id", "reply")
+                .put("role", "assistant")
+                .put("content", "keep this reply"));
+    persisted.put("tao", history("tao", usable).getJSONArray("tao"));
+    store.commitHistory(persisted);
+    JSONObject orphan =
+        store
+            .importImage("moon", picture(10, 10, Bitmap.CompressFormat.PNG))
+            .getJSONObject("image");
+    Files.delete(new File(directory, "lin/" + missing.getString("id") + ".jpg").toPath());
+    String unchanged = persisted.toString();
+    ChatImageStore restart = new ChatImageStore(directory);
+    assertFalse(restart.restoreHistory(persisted));
+    assertEquals(unchanged, persisted.toString());
+    assertEquals(
+        "keep this text", persisted.getJSONArray("lin").getJSONObject(0).getString("content"));
+    assertNull(restart.preview("lin", missing.getString("id")));
+    assertNotNull(restart.resolve("tao", usable));
+    assertNotNull(restart.preview("moon", orphan.getString("id")));
+    restart.validateForSave(new JSONObject(persisted.toString()), persisted);
+    JSONObject textOnly = new JSONObject(persisted.toString());
+    textOnly.getJSONArray("lin").getJSONObject(0).remove("image");
+    restart.validateForSave(textOnly, persisted);
+    JSONObject fresh =
+        restart
+            .importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG))
+            .getJSONObject("image");
+    JSONObject replaced = new JSONObject(persisted.toString());
+    replaced.getJSONArray("lin").getJSONObject(0).put("image", fresh);
+    restart.validateForSave(replaced, persisted);
+    assertTrue(restart.restoreHistory(replaced));
+    assertNotNull(restart.resolve("lin", fresh));
+    assertNull(restart.preview("moon", orphan.getString("id")));
+  }
+
+  @Test
+  public void unavailablePersistedReferencesCannotBeForgedChangedOrMoved() throws Exception {
+    File directory = Files.createTempDirectory("qiban-image-save-reference").toFile();
+    ChatImageStore store = new ChatImageStore(directory);
+    JSONObject image =
+        store.importImage("lin", picture(10, 10, Bitmap.CompressFormat.PNG)).getJSONObject("image");
+    JSONObject previous = history("lin", image);
+    store.commitHistory(previous);
+    Files.write(
+        new File(directory, "lin/" + image.getString("id") + ".jpg").toPath(),
+        "damaged".getBytes(StandardCharsets.UTF_8));
+    assertFalse(store.restoreHistory(previous));
+    store.validateForSave(new JSONObject(previous.toString()), previous);
+    JSONObject changed = new JSONObject(image.toString()).put("width", image.getInt("width") + 1),
+        unknown = new JSONObject(image.toString()).put("id", "image-" + UUID.randomUUID());
+    for (JSONObject invalid :
+        new JSONObject[] {
+          history("lin", changed), history("lin", unknown), history("tao", image)
+        }) {
+      try {
+        store.validateForSave(invalid, previous);
+        fail("new or changed unavailable reference must fail");
+      } catch (IllegalArgumentException expected) {
+      }
+    }
+    try {
+      store.commitHistory(previous);
+      fail("explicit commits remain strict");
+    } catch (IllegalArgumentException expected) {
+    }
+    JSONObject text = new JSONObject(previous.toString());
+    JSONObject message = text.getJSONArray("lin").getJSONObject(0);
+    message.remove("image");
+    message.put("content", "text survives");
+    store.validateForSave(text, previous);
+    assertTrue(store.restoreHistory(text));
   }
 }

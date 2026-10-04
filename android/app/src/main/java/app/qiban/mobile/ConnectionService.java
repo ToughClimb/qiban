@@ -17,6 +17,8 @@ public final class ConnectionService {
   private final NativeHttp http = new NativeHttp();
   private final Map<String, NativeHttp.Cancellation> active = new HashMap<>();
   private final Map<String, JSONObject> activeBasis = new HashMap<>();
+  private static final int MAX_EARLY_CANCELLATIONS = 128;
+  private final LinkedHashSet<String> cancelledBeforeRegistration = new LinkedHashSet<>();
   private NativeHttp.Cancellation setup;
 
   public ConnectionService(Context context) {
@@ -24,29 +26,34 @@ public final class ConnectionService {
   }
 
   public ConnectionService(Context context, ChatImageStore imageStore) {
-    images =
-        imageStore == null
-            ? null
-            : new ImageResolver() {
-              @Override
-              public ChatImageStore.StoredImage resolve(String owner, JSONObject metadata)
-                  throws Exception {
-                return imageStore.resolve(owner, metadata);
-              }
+    this(new KeyStoreSecrets(context), resolverFor(imageStore));
+  }
 
-              @Override
-              public ChatImageStore.StoredImage resolve(
-                  String owner, JSONObject metadata, NativeHttp.Cancellation token)
-                  throws Exception {
-                return imageStore.resolve(
-                    owner,
-                    metadata,
-                    () -> token.cancelled || Thread.currentThread().isInterrupted());
-              }
-            };
-    secrets = new KeyStoreSecrets(context);
+  private static ImageResolver resolverFor(ChatImageStore imageStore) {
+    return imageStore == null
+        ? null
+        : new ImageResolver() {
+          @Override
+          public ChatImageStore.StoredImage resolve(String owner, JSONObject metadata)
+              throws Exception {
+            return imageStore.resolve(owner, metadata);
+          }
+
+          @Override
+          public ChatImageStore.StoredImage resolve(
+              String owner, JSONObject metadata, NativeHttp.Cancellation token) throws Exception {
+            return imageStore.resolve(
+                owner, metadata, () -> token.cancelled || Thread.currentThread().isInterrupted());
+          }
+        };
+  }
+
+  // Inject native dependencies so state transitions can be verified without Android or networking.
+  ConnectionService(KeyStoreSecrets secrets, ImageResolver images) {
+    this.secrets = secrets;
+    this.images = images;
     try {
-      JSONObject s = secrets.load();
+      JSONObject s = secrets == null ? null : secrets.load();
       if (s != null) {
         String u = NativeHttp.normalize(s.getString("baseUrl")),
             k = s.getString("key"),
@@ -228,9 +235,22 @@ public final class ConnectionService {
     models = new JSONArray();
   }
 
+  private static boolean validRequestId(String id) {
+    return id != null && id.matches("[a-zA-Z0-9-]{1,64}");
+  }
+
   public synchronized void cancel(String id) {
-    NativeHttp.Cancellation c = active.get(id);
-    if (c != null) c.cancel();
+    if (!validRequestId(id)) return;
+    NativeHttp.Cancellation token = active.get(id);
+    if (token != null) {
+      token.cancel();
+      return;
+    }
+    cancelledBeforeRegistration.remove(id);
+    cancelledBeforeRegistration.add(id);
+    if (cancelledBeforeRegistration.size() > MAX_EARLY_CANCELLATIONS) {
+      cancelledBeforeRegistration.remove(cancelledBeforeRegistration.iterator().next());
+    }
   }
 
   /** Cancel only requests that still use the replaced tail, keeping an already edited retry. */
@@ -670,10 +690,12 @@ public final class ConnectionService {
     } catch (Exception invalid) {
       throw new IllegalArgumentException(INPUT);
     }
-    if (id == null || !id.matches("[a-zA-Z0-9-]{1,64}")) throw new IllegalArgumentException(INPUT);
+    if (!validRequestId(id)) throw new IllegalArgumentException(INPUT);
     final String u, k, m;
     final NativeHttp.Cancellation token;
     synchronized (this) {
+      if (cancelledBeforeRegistration.remove(id))
+        throw new NativeHttp.Failure("cancelled", "已取消这次连接。");
       if (configuring || !active.isEmpty()) throw new IllegalArgumentException("正在等待回复，请稍等。");
       if (!enabled || key == null || model.isEmpty()) {
         if (hasImages(request)) throw new IllegalArgumentException("演示模式暂不支持图片聊天，请先连接支持图片的服务。");

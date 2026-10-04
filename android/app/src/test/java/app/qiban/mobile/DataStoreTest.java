@@ -2,6 +2,8 @@ package app.qiban.mobile;
 
 import static org.junit.Assert.*;
 
+import android.content.Context;
+import android.content.ContextWrapper;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -10,6 +12,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
@@ -19,6 +22,18 @@ public class DataStoreTest {
 
   private DataStore store() throws Exception {
     return new DataStore(Files.createTempDirectory("qiban-test").toFile());
+  }
+
+  private static Context aliasedFilesDir() throws Exception {
+    java.nio.file.Path base = Files.createTempDirectory("qiban-trusted-base-alias");
+    java.nio.file.Path actual = Files.createDirectory(base.resolve("actual"));
+    File alias = Files.createSymbolicLink(base.resolve("files-alias"), actual).toFile();
+    return new ContextWrapper(RuntimeEnvironment.getApplication()) {
+      @Override
+      public File getFilesDir() {
+        return alias;
+      }
+    };
   }
 
   @Test
@@ -226,5 +241,87 @@ public class DataStoreTest {
       fail();
     } catch (IllegalArgumentException expected) {
     }
+  }
+
+  @Test
+  public void trustedContextFilesDirAliasCanSaveAndReloadExistingHistory() throws Exception {
+    Context context = aliasedFilesDir();
+    DataStore store = new DataStore(context);
+    JSONObject history =
+        new JSONObject()
+            .put(
+                "lin",
+                new JSONArray()
+                    .put(
+                        new JSONObject()
+                            .put("id", "synthetic-user")
+                            .put("role", "user")
+                            .put("content", "合成测试记录")));
+    store.saveHistory(history);
+    assertEquals(history.toString(), store.loadHistory().toString());
+    store.saveHistory(history);
+    assertEquals(history.toString(), new DataStore(context).loadHistory().toString());
+    assertTrue(
+        new File(context.getFilesDir().getCanonicalFile(), "qiban-data/history.json").isFile());
+  }
+
+  @Test
+  public void trustedContextFilesDirAliasPreservesExactSourceCardJson() throws Exception {
+    Context context = aliasedFilesDir();
+    DataStore store = new DataStore(context);
+    String id = store.saveCard(null, RAW);
+    assertEquals(RAW, store.rawCard(id));
+    assertEquals(RAW, store.listCards().getJSONArray("cards").getJSONObject(0).getString("raw"));
+    assertEquals(id, store.saveCard(id, RAW));
+    assertEquals(RAW, new DataStore(context).rawCard(id));
+  }
+
+  @Test
+  public void trustedBaseAliasDoesNotNormalizeOwnedDirectoryOrFileAliases() throws Exception {
+    Context context = aliasedFilesDir();
+    File base = context.getFilesDir().getCanonicalFile();
+    java.nio.file.Path outside = Files.createTempDirectory("qiban-outside-data");
+    File owned = new File(base, "qiban-data");
+    Files.createSymbolicLink(owned.toPath(), outside);
+    assertThrows(IllegalArgumentException.class, () -> new DataStore(context));
+    Files.delete(owned.toPath());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DataStore(new File(context.getFilesDir(), "qiban-data")));
+    DataStore store = new DataStore(context);
+    String id = "card-01234567-89ab-cdef-0123-456789abcdef";
+    java.nio.file.Path source = outside.resolve("source.json");
+    Files.write(source, RAW.getBytes(StandardCharsets.UTF_8));
+    Files.createSymbolicLink(new File(owned, id + ".json").toPath(), source);
+    assertThrows(IllegalArgumentException.class, () -> store.rawCard(id));
+    assertThrows(IllegalArgumentException.class, () -> store.saveCard(id, RAW));
+    assertEquals(0, store.listCards().getJSONArray("cards").length());
+    assertEquals(1, store.listCards().getJSONArray("issues").length());
+    java.nio.file.Path history = outside.resolve("outside-history.json");
+    Files.write(history, "{}".getBytes(StandardCharsets.UTF_8));
+    Files.createSymbolicLink(new File(owned, "history.json").toPath(), history);
+    assertThrows(IllegalArgumentException.class, store::loadHistory);
+    assertThrows(IllegalArgumentException.class, () -> store.saveHistory(new JSONObject()));
+    assertEquals(RAW, new String(Files.readAllBytes(source), StandardCharsets.UTF_8));
+    assertEquals("{}", new String(Files.readAllBytes(history), StandardCharsets.UTF_8));
+  }
+
+  @Test
+  public void replacingOwnedDirectoryWithLinkCannotWriteOrDeleteOutside() throws Exception {
+    Context context = aliasedFilesDir();
+    File base = context.getFilesDir().getCanonicalFile();
+    DataStore store = new DataStore(context);
+    java.nio.file.Path owned = new File(base, "qiban-data").toPath();
+    Files.move(owned, new File(base, "original-data").toPath());
+    java.nio.file.Path outside = Files.createTempDirectory("qiban-outside-data-swap");
+    java.nio.file.Path preserved = outside.resolve("history.json");
+    Files.write(preserved, "{}".getBytes(StandardCharsets.UTF_8));
+    Files.createSymbolicLink(owned, outside);
+    assertThrows(IllegalArgumentException.class, store::loadHistory);
+    assertThrows(IllegalArgumentException.class, () -> store.saveHistory(new JSONObject()));
+    assertThrows(IllegalArgumentException.class, () -> store.saveCard(null, RAW));
+    assertThrows(IllegalArgumentException.class, store::deleteAll);
+    assertEquals("{}", new String(Files.readAllBytes(preserved), StandardCharsets.UTF_8));
+    assertEquals(1, outside.toFile().listFiles().length);
   }
 }

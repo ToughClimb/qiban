@@ -351,4 +351,37 @@ public class ImageConnectionTest {
     saved.getJSONObject(saved.length() - 1).put("content", "changed");
     assertFalse(ConnectionService.matchesSavedBasis(basis, "lin", saved));
   }
+
+  @Test
+  public void earlyCancelIsConsumedBeforeChatCanEnterDemoOrLiveWork() throws Exception {
+    ConnectionService service =
+        new ConnectionService((KeyStoreSecrets) null, (ConnectionService.ImageResolver) null);
+    JSONObject input = request(new JSONArray().put(user("hello", null)));
+    service.cancel("early-request");
+    try {
+      service.chat(input, persona(), "early-request");
+      fail("canceled request must not enter demo or transport");
+    } catch (NativeHttp.Failure expected) {
+      assertEquals("cancelled", expected.code);
+    }
+    assertEquals("demo", service.chat(input, persona(), "early-request").getString("mode"));
+    service.cancel(null);
+    service.cancel("invalid/request/id");
+    assertEquals("demo", service.chat(input, persona(), "valid-request").getString("mode"));
+  }
+
+  @Test
+  public void earlyCancellationIdsHaveBoundedRetention() throws Exception {
+    ConnectionService service =
+        new ConnectionService((KeyStoreSecrets) null, (ConnectionService.ImageResolver) null);
+    JSONObject input = request(new JSONArray().put(user("hello", null)));
+    for (int i = 0; i < 129; i++) service.cancel("request-" + i);
+    assertEquals("demo", service.chat(input, persona(), "request-0").getString("mode"));
+    try {
+      service.chat(input, persona(), "request-128");
+      fail();
+    } catch (NativeHttp.Failure expected) {
+      assertEquals("cancelled", expected.code);
+    }
+  }
 }

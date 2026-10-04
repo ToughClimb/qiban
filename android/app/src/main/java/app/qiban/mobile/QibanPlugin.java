@@ -342,7 +342,7 @@ public class QibanPlugin extends Plugin {
         call,
         () -> {
           JSONObject history = data.loadHistory();
-          chatImages.commitHistory(history);
+          chatImages.restoreHistory(history);
           return history;
         });
   }
@@ -354,8 +354,8 @@ public class QibanPlugin extends Plugin {
         () -> {
           JSONObject history = call.getObject("history");
           synchronized (chatImages) {
-            chatImages.validateReferences(history);
             JSONObject previous = data.loadHistory();
+            chatImages.validateForSave(history, previous);
             data.saveHistory(history);
             java.util.Iterator<String> owners = previous.keys();
             while (owners.hasNext()) {
@@ -369,7 +369,7 @@ public class QibanPlugin extends Plugin {
                 chatImages.invalidatePending(owner);
               }
             }
-            chatImages.commitHistory(history);
+            chatImages.restoreHistory(history);
           }
           return null;
         });

@@ -67,12 +67,36 @@ public final class DataStore {
   private final File directory;
 
   public DataStore(Context context) {
-    this(new File(context.getFilesDir(), "qiban-data"));
+    this(contextDirectory(context));
   }
 
   DataStore(File directory) {
-    this.directory = directory;
-    if (!directory.isDirectory() && !directory.mkdirs()) throw error("无法创建本地数据目录");
+    this.directory = directory.getAbsoluteFile();
+    try {
+      // Only Context's trusted base is canonicalized. Owned aliases remain forbidden.
+      if (!this.directory.getCanonicalFile().equals(this.directory)) throw new IOException();
+      if (!this.directory.isDirectory() && !this.directory.mkdirs()) throw new IOException();
+      requireDirectory();
+    } catch (Exception failure) {
+      throw error("无法创建本地数据目录");
+    }
+  }
+
+  private static File contextDirectory(Context context) {
+    try {
+      return new File(context.getFilesDir().getCanonicalFile(), "qiban-data");
+    } catch (IOException failure) {
+      throw error("无法创建本地数据目录");
+    }
+  }
+
+  private void requireDirectory() {
+    try {
+      if (!directory.isDirectory() || !directory.getCanonicalFile().equals(directory))
+        throw new IOException();
+    } catch (IOException failure) {
+      throw error("无法读取本地数据");
+    }
   }
 
   private static IllegalArgumentException error(String message) {
@@ -84,6 +108,7 @@ public final class DataStore {
   }
 
   private File card(String id) {
+    requireDirectory();
     checkId(id);
     return new File(directory, id + ".json");
   }
@@ -93,6 +118,7 @@ public final class DataStore {
   }
 
   private String read(File file, int limit) throws IOException {
+    requireDirectory();
     if (!file.isFile()
         || !file.getCanonicalFile().equals(file.getAbsoluteFile())
         || file.length() > limit) throw new IOException();
@@ -112,6 +138,7 @@ public final class DataStore {
   }
 
   private void atomic(File target, String raw) throws IOException {
+    requireDirectory();
     File temp = File.createTempFile("pending-", ".tmp", directory);
     try {
       try (FileOutputStream out = new FileOutputStream(temp)) {
@@ -129,6 +156,7 @@ public final class DataStore {
   }
 
   public synchronized JSONObject listCards() {
+    requireDirectory();
     JSONArray cards = new JSONArray(), issues = new JSONArray();
     File[] files = directory.listFiles();
     if (files == null) throw error("无法读取本地数据");
@@ -216,6 +244,7 @@ public final class DataStore {
   }
 
   public synchronized JSONObject loadHistory() {
+    requireDirectory();
     File file = new File(directory, "history.json");
     if (!file.exists()) return new JSONObject();
     try {
@@ -234,6 +263,7 @@ public final class DataStore {
   }
 
   public synchronized void saveHistory(JSONObject history) {
+    requireDirectory();
     validateHistory(history);
     File target = new File(directory, "history.json");
     if (target.exists()) loadHistory();
@@ -245,6 +275,7 @@ public final class DataStore {
   }
 
   public synchronized void deleteAll() {
+    requireDirectory();
     File[] files = directory.listFiles();
     if (files == null) throw error("无法读取本地数据");
     for (File file : files) {

@@ -412,4 +412,86 @@ public final class NativeImageChatSmokeTest {
       }
     }
   }
+
+  @Test
+  public void missingImageAfterRestartKeepsBothConversationsEditable() throws Exception {
+    try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+      NativeOriginStorageSmokeTest.awaitAndroidSettings(scenario);
+      QibanPlugin[] holder = new QibanPlugin[1];
+      scenario.onActivity(
+          activity ->
+              holder[0] = (QibanPlugin) activity.getBridge().getPlugin("Qiban").getInstance());
+      ChatImageStore store = (ChatImageStore) field(holder[0], "chatImages");
+      JSONObject picked =
+          pickerResult(holder[0], store, store.generation("lin"), Activity.RESULT_OK).result;
+      assertTrue("Recovery fixture import: " + picked.optString("error"), picked.getBoolean("ok"));
+      JSONObject image = picked.getJSONObject("value").getJSONObject("image");
+      JSONObject user =
+          new JSONObject()
+              .put("id", "missing-image-turn")
+              .put("role", "user")
+              .put("content", "保留文字")
+              .put("image", image);
+      JSONObject history =
+          new JSONObject()
+              .put(
+                  "lin",
+                  new JSONArray()
+                      .put(user)
+                      .put(
+                          new JSONObject()
+                              .put("id", "retained-reply")
+                              .put("role", "assistant")
+                              .put("content", "已有回复")))
+              .put(
+                  "tao",
+                  new JSONArray()
+                      .put(
+                          new JSONObject()
+                              .put("id", "unaffected-turn")
+                              .put("role", "user")
+                              .put("content", "另一个对话")));
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", history));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+      java.io.File root = (java.io.File) field(store, "root");
+      assertTrue(
+          new java.io.File(new java.io.File(root, "lin"), image.getString("id") + ".jpg").delete());
+      scenario.recreate();
+      NativeOriginStorageSmokeTest.awaitAndroidSettings(scenario);
+      nativeCall(scenario, "loadHistory", new JSONObject());
+      JSONObject loaded = new JSONObject(settled(scenario));
+      assertTrue("Missing bytes must not reject all history", loaded.getBoolean("ok"));
+      JSONObject restored = loaded.getJSONObject("value");
+      assertEquals(history.toString(), restored.toString());
+      nativeCall(
+          scenario,
+          "chatImagePreview",
+          new JSONObject().put("characterId", "lin").put("imageId", image.getString("id")));
+      JSONObject preview = new JSONObject(settled(scenario));
+      assertTrue(preview.getBoolean("ok"));
+      assertTrue(preview.isNull("value"));
+      restored.getJSONArray("tao").getJSONObject(0).put("content", "仍可编辑另一对话");
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", restored));
+      assertTrue(
+          "Unchanged missing reference permits unrelated edits",
+          new JSONObject(settled(scenario)).getBoolean("ok"));
+      restored.getJSONArray("lin").getJSONObject(0).remove("image");
+      restored.getJSONArray("lin").getJSONObject(0).put("content", "图片已移除，文字保留");
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", restored));
+      assertTrue(
+          "Text recovery remains available", new JSONObject(settled(scenario)).getBoolean("ok"));
+      nativeCall(scenario, "loadHistory", new JSONObject());
+      JSONObject recovered = new JSONObject(settled(scenario));
+      assertTrue(recovered.getBoolean("ok"));
+      assertEquals(
+          "图片已移除，文字保留",
+          recovered
+              .getJSONObject("value")
+              .getJSONArray("lin")
+              .getJSONObject(0)
+              .getString("content"));
+      nativeCall(scenario, "saveHistory", new JSONObject().put("history", new JSONObject()));
+      assertTrue(new JSONObject(settled(scenario)).getBoolean("ok"));
+    }
+  }
 }
