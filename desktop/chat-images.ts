@@ -6,6 +6,7 @@ import { imageFormat, pngChunks, MAX_IMAGE_BYTES } from "./image-format.js";
 import { ConnectionError } from "./network.js";
 import { CHAT_IMAGE_ID, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_IMAGE_EDGE, type ChatImageAttachment, type ChatImageDraft } from "../shared/image-chat.js";
 import type { Conversations } from "../shared/history.js";
+import { conversationInterrupted } from "./history.js";
 import { imageDataUrl, type ChatImageResolver } from "../server/image-chat.js";
 
 const failure = () => new ConnectionError("image", "图片无法读取，请重新选择有效的 PNG、JPEG 或静态 WebP 图片（不超过 5 MiB、4096 像素）。");
@@ -132,10 +133,13 @@ export class ChatImageStore {
   reconcile(history: Conversations, previous?: Conversations) {
     if (previous) {
       for (const owner of new Set([...Object.keys(previous), ...Object.keys(history), ...this.drafts.keys(), ...this.revisions.keys()])) {
-        if ((previous[owner]?.length ?? 0) > (history[owner]?.length ?? 0) || (Object.hasOwn(previous, owner) && !Object.hasOwn(history, owner))) {
+        if (conversationInterrupted(previous[owner], history[owner])) {
           this.revisions.set(owner, (this.revisions.get(owner) ?? 0) + 1);
           const draft = this.drafts.get(owner);
-          if (draft) { this.remove(owner, draft.id); this.drafts.delete(owner); }
+          if (draft) {
+            if (!history[owner]?.some(message => message.image?.id === draft.id)) this.remove(owner, draft.id);
+            this.drafts.delete(owner);
+          }
         }
       }
     }

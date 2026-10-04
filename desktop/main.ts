@@ -271,8 +271,7 @@ if (locked)
         const previous = history.load();
         history.save(value);
         const saved = history.load();
-        for (const owner of Object.keys(previous))
-          if ((saved[owner]?.length ?? 0) < (previous[owner]?.length ?? 0)) service!.cancelCharacter(owner);
+        service!.historySaved(previous, saved);
         images.reconcile(saved, previous);
       });
       handle("data:path", () => directory);
