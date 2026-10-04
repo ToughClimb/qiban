@@ -9,6 +9,7 @@ import {
 import { CardPanel } from "./CardPanel";
 import type { Character } from "../shared/characters";
 import { ConnectionPanel } from "./ConnectionPanel";
+import { AndroidConnectionPanel } from "./android/AndroidConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
 import {
@@ -34,6 +35,7 @@ function loadSaved(): Conversations {
   }
 }
 export function App() {
+  const ConnectionSettings = window.qibanPlatform === "android" ? AndroidConnectionPanel : ConnectionPanel;
   const desktop = desktopBridge();
   const [companions, setCompanions] =
     useState<readonly Character[]>(characters);
@@ -330,7 +332,7 @@ export function App() {
               />
             )}
             {desktop && (
-              <ConnectionPanel
+              <ConnectionSettings
                 onChanged={(value) => {
                   cancelRequest();
                   setMode(value);
