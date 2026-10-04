@@ -32,6 +32,11 @@ async function launch() {
 try {
   let page = await launch();
   await page.getByRole("button", { name: "先用演示聊天" }).click();
+  await page.getByRole("button", { name: "连接与数据" }).click();
+  await page.locator(".appearance-options > summary").click();
+  await page.getByRole("button", { name: "雾蓝主题色" }).click();
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--accent"))).toBe("#46618a");
+  await page.getByRole("button", { name: "关闭连接设置" }).click();
   const preferences = await application.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences(),
   );
@@ -83,6 +88,7 @@ try {
   await application.close();
   application = undefined;
   page = await launch();
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--accent"))).toBe("#46618a");
   await expect(
     page.getByText("native history fixture", { exact: true }),
   ).toBeVisible();
@@ -262,6 +268,10 @@ try {
   }, avatarFiles[0]);
   expect((await page.evaluate(() => window.qiban.importAvatar("moon"))).ok).toBe(true);
   expect((await page.evaluate(() => window.qiban.deleteData())).ok).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem("qiban.appearance.v1"))).toBe(null);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--accent"))).toBe("#415d4d");
+  console.log("PASS native appearance: selection, process restart and origin-storage wipe bypassing App reset restore default");
   await expect(readFile(join(dataPath, "avatars", "moon.png"))).rejects.toThrow();
   console.log("PASS native avatar picker: real PNG/JPEG/WebP decode/resize, invalid input, cancel, persistence, role deletion and all-data deletion; app-owned image URLs only");
   const untrusted = await application.evaluate(

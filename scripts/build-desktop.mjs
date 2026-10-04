@@ -49,7 +49,7 @@ async function includePackage(source) {
 for (const source of Object.keys(desktop.metafile.inputs)) {
   if (source.includes("node_modules/")) await includePackage(source);
 }
-for (const name of ["react", "react-dom", "scheduler"]) {
+for (const name of ["react", "react-dom", "scheduler", "@capacitor/core"]) {
   await includePackage(require.resolve(name));
 }
 const notices = [

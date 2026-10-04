@@ -7,7 +7,7 @@ on:
         type: boolean
         default: true
   push:
-    branches: [feat/android]
+    branches: [feat/android, feat/qiban-mvp]
   pull_request:
     paths:
       [
