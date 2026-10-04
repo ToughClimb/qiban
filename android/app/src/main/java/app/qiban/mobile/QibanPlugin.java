@@ -21,9 +21,17 @@ public class QibanPlugin extends Plugin {
   private final ExecutorService chats = Executors.newFixedThreadPool(2);
   private ConnectionService connection;
   private DataStore data;
+  private AvatarStore avatars;
+  private volatile boolean destroyed;
+  private PluginCall pendingPickerCall;
+  private final java.util.Set<InputStream> openImports =
+      java.util.Collections.synchronizedSet(new java.util.HashSet<>());
   private String pendingExport;
   private boolean pickerBusy;
   private boolean keyDialogBusy;
+  private AlertDialog keyDialog;
+  private EditText keyInput;
+  private PluginCall keyCall;
   private final java.util.concurrent.atomic.AtomicLong completed =
       new java.util.concurrent.atomic.AtomicLong();
   private final java.util.concurrent.atomic.AtomicLong failed =
@@ -82,7 +90,25 @@ public class QibanPlugin extends Plugin {
                   "请选择服务提供的模型，或填写服务方给出的模型名称。",
                   "这个地址不支持此功能，请检查服务地址。",
                   "这个地址没有返回兼容的模型列表。",
-                  "连接不上此服务，请检查地址和网络后重试。")));
+                  "连接不上此服务，请检查地址和网络后重试。",
+                  "仅支持 PNG、JPEG 或 WebP 图片",
+                  "图片尺寸或格式无效",
+                  "图片超过 5 MiB 限制",
+                  "头像文件损坏",
+                  "头像角色标识无效",
+                  "无法保存头像；原有数据已保留",
+                  "无法创建头像目录",
+                  "无法删除头像",
+                  "无法清除头像",
+                  "无法读取图片",
+                  "无法读取头像",
+                  "无法转换头像",
+                  "本地头像容量已满",
+                  "转换后的头像超过容量限制")));
+  private static final int MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+  private static final java.util.regex.Pattern AVATAR_ID =
+      java.util.regex.Pattern.compile(
+          "(?:lin|tao|dou|moon|card-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})");
   private static final int MAX_CARD_BYTES = 128 * 1024;
 
   interface Work {
@@ -93,6 +119,7 @@ public class QibanPlugin extends Plugin {
   public void load() {
     connection = new ConnectionService(getContext());
     data = new DataStore(getContext());
+    avatars = new AvatarStore(getContext());
   }
 
   private void ok(PluginCall call, Object value) {
@@ -167,8 +194,14 @@ public class QibanPlugin extends Plugin {
       fail(call, "请先完成密钥输入。");
       return;
     }
+    if (destroyed) {
+      fail(call, "已取消连接。");
+      return;
+    }
     keyDialogBusy = true;
+    keyCall = call;
     EditText input = new EditText(getContext());
+    keyInput = input;
     input.setSingleLine(true);
     input.setInputType(
         InputType.TYPE_CLASS_TEXT
@@ -189,6 +222,7 @@ public class QibanPlugin extends Plugin {
                 "连接",
                 (d, w) -> {
                   keyDialogBusy = false;
+                  keyCall = null;
                   String key = input.getText().toString();
                   input.setText("");
                   run(
@@ -203,6 +237,7 @@ public class QibanPlugin extends Plugin {
                 "取消",
                 (d, w) -> {
                   keyDialogBusy = false;
+                  keyCall = null;
                   input.setText("");
                   fail(call, "已取消连接。");
                 })
@@ -210,8 +245,15 @@ public class QibanPlugin extends Plugin {
     dialog.setOnCancelListener(
         d -> {
           keyDialogBusy = false;
+          keyCall = null;
           input.setText("");
           fail(call, "已取消连接。");
+        });
+    keyDialog = dialog;
+    dialog.setOnDismissListener(
+        d -> {
+          keyDialog = null;
+          keyInput = null;
         });
     dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
     dialog.show();
@@ -244,6 +286,7 @@ public class QibanPlugin extends Plugin {
         () -> {
           connection.deleteAll();
           data.deleteAll();
+          avatars.deleteAll();
           return null;
         });
   }
@@ -265,7 +308,13 @@ public class QibanPlugin extends Plugin {
 
   @PluginMethod
   public void listCards(PluginCall call) {
-    run(call, () -> data.listCards());
+    run(
+        call,
+        () -> {
+          JSONObject result = data.listCards();
+          result.put("avatarUrls", avatars.list());
+          return result;
+        });
   }
 
   @PluginMethod
@@ -278,7 +327,112 @@ public class QibanPlugin extends Plugin {
     run(
         call,
         () -> {
-          data.deleteCard(required(call, "id"));
+          String id = required(call, "id");
+          data.deleteCard(id);
+          avatars.delete(id);
+          return null;
+        });
+  }
+
+  private void launchPicker(PluginCall call, Intent intent, String callback) {
+    if (destroyed) {
+      ok(call, null);
+      return;
+    }
+    pickerBusy = true;
+    pendingPickerCall = call;
+    try {
+      startActivityForResult(call, intent, callback);
+    } catch (RuntimeException error) {
+      pickerBusy = false;
+      pendingPickerCall = null;
+      pendingExport = null;
+      fail(call, "无法打开文件选择器，请稍后重试。");
+    }
+  }
+
+  private String avatarId(PluginCall call) {
+    String id = call.getString("id");
+    if (id == null || !AVATAR_ID.matcher(id).matches())
+      throw new IllegalArgumentException("角色标识无效");
+    return id;
+  }
+
+  private byte[] readImport(Uri uri, int limit) throws IOException {
+    if (uri == null || !"content".equals(uri.getScheme())) throw new IOException();
+    InputStream stream = getContext().getContentResolver().openInputStream(uri);
+    if (stream == null) throw new IOException();
+    openImports.add(stream);
+    try (InputStream input = stream;
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+      if (destroyed) throw new IOException();
+      byte[] buffer = new byte[8192];
+      int count;
+      while ((count = input.read(buffer)) != -1) {
+        if (destroyed || Thread.currentThread().isInterrupted()) throw new IOException();
+        if (bytes.size() + count > limit)
+          throw new IllegalArgumentException(
+              limit == MAX_AVATAR_BYTES ? "图片超过 5 MiB 限制" : "角色卡超过大小限制");
+        bytes.write(buffer, 0, count);
+      }
+      return bytes.toByteArray();
+    } finally {
+      openImports.remove(stream);
+    }
+  }
+
+  @PluginMethod
+  public void importAvatar(PluginCall call) {
+    try {
+      avatarId(call);
+    } catch (Exception error) {
+      fail(call, safeError(error));
+      return;
+    }
+    getActivity()
+        .runOnUiThread(
+            () -> {
+              if (pickerBusy) {
+                fail(call, "请先完成当前文件操作。");
+                return;
+              }
+              Intent intent =
+                  new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                      .addCategory(Intent.CATEGORY_OPENABLE)
+                      .setType("image/*")
+                      .putExtra(
+                          Intent.EXTRA_MIME_TYPES,
+                          new String[] {"image/png", "image/jpeg", "image/webp"});
+              launchPicker(call, intent, "avatarResult");
+            });
+  }
+
+  @ActivityCallback
+  private void avatarResult(PluginCall call, ActivityResult result) {
+    pickerBusy = false;
+    pendingPickerCall = null;
+    if (call == null || destroyed) return;
+    if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
+      ok(call, null);
+      return;
+    }
+    Uri uri = result.getData().getData();
+    run(
+        call,
+        () -> {
+          String id = avatarId(call);
+          // A card may have been deleted while the system picker was open.
+          if (id.startsWith("card-")) data.rawCard(id);
+          return avatars.importImage(id, readImport(uri, MAX_AVATAR_BYTES));
+        });
+  }
+
+  @PluginMethod
+  public void deleteAvatar(PluginCall call) {
+    run(
+        call,
+        () -> {
+          avatars.delete(avatarId(call));
           return null;
         });
   }
@@ -292,19 +446,19 @@ public class QibanPlugin extends Plugin {
                 fail(call, "请先完成当前文件操作。");
                 return;
               }
-              pickerBusy = true;
               Intent intent =
                   new Intent(Intent.ACTION_OPEN_DOCUMENT)
                       .addCategory(Intent.CATEGORY_OPENABLE)
                       .setType("*/*");
-              startActivityForResult(call, intent, "importResult");
+              launchPicker(call, intent, "importResult");
             });
   }
 
   @ActivityCallback
   private void importResult(PluginCall call, ActivityResult result) {
     pickerBusy = false;
-    if (call == null) return;
+    pendingPickerCall = null;
+    if (call == null || destroyed) return;
     if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
       ok(call, null);
       return;
@@ -313,25 +467,15 @@ public class QibanPlugin extends Plugin {
     run(
         call,
         () -> {
-          if (uri == null || !"content".equals(uri.getScheme())) throw new IOException();
-          try (InputStream stream = getContext().getContentResolver().openInputStream(uri);
-              ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-            if (stream == null) throw new IOException();
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = stream.read(buffer)) != -1) {
-              if (bytes.size() + count > MAX_CARD_BYTES) throw new IOException();
-              bytes.write(buffer, 0, count);
-            }
-            JSObject value = new JSObject();
-            value.put(
-                "raw",
-                StandardCharsets.UTF_8
-                    .newDecoder()
-                    .decode(java.nio.ByteBuffer.wrap(bytes.toByteArray()))
-                    .toString());
-            return value;
-          }
+          byte[] bytes = readImport(uri, MAX_CARD_BYTES);
+          JSObject value = new JSObject();
+          value.put(
+              "raw",
+              StandardCharsets.UTF_8
+                  .newDecoder()
+                  .decode(java.nio.ByteBuffer.wrap(bytes))
+                  .toString());
+          return value;
         });
   }
 
@@ -348,14 +492,13 @@ public class QibanPlugin extends Plugin {
                       fail(call, "请先完成当前导出。");
                       return;
                     }
-                    pickerBusy = true;
                     pendingExport = raw;
                     Intent intent =
                         new Intent(Intent.ACTION_CREATE_DOCUMENT)
                             .addCategory(Intent.CATEGORY_OPENABLE)
                             .setType("application/json")
                             .putExtra(Intent.EXTRA_TITLE, "角色卡.json");
-                    startActivityForResult(call, intent, "exportResult");
+                    launchPicker(call, intent, "exportResult");
                   });
           return Deferred.VALUE;
         });
@@ -364,9 +507,10 @@ public class QibanPlugin extends Plugin {
   @ActivityCallback
   private void exportResult(PluginCall call, ActivityResult result) {
     pickerBusy = false;
+    pendingPickerCall = null;
     String raw = pendingExport;
     pendingExport = null;
-    if (call == null) return;
+    if (call == null || destroyed) return;
     if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
       ok(call, null);
       return;
@@ -440,6 +584,25 @@ public class QibanPlugin extends Plugin {
 
   @Override
   protected void handleOnDestroy() {
+    destroyed = true;
+    if (keyInput != null) keyInput.setText("");
+    if (keyCall != null) fail(keyCall, "已取消连接。");
+    keyCall = null;
+    if (keyDialog != null) keyDialog.dismiss();
+    keyDialogBusy = false;
+    if (pendingPickerCall != null) ok(pendingPickerCall, null);
+    pendingPickerCall = null;
+    pendingExport = null;
+    pickerBusy = false;
+    synchronized (openImports) {
+      for (InputStream stream : openImports) {
+        try {
+          stream.close();
+        } catch (IOException ignored) {
+        }
+      }
+      openImports.clear();
+    }
     connection.cancelAll();
     worker.shutdownNow();
     chats.shutdownNow();
