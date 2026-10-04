@@ -11,6 +11,7 @@ const server=spawn(process.execPath,['dist/server/index.js'],{env:{...process.en
 let browser;
 const failures=[];
 async function scenario(name, exercise, options={}) {
+ if(process.env.QIBAN_IMAGE_UI_FILTER&&!name.includes(process.env.QIBAN_IMAGE_UI_FILTER))return;
  const context=await browser.newContext({viewport:options.mobile?{width:390,height:844}:{width:1280,height:800}});
  await context.addInitScript(({characters,previewUrl,image,options})=>{
   const ok=value=>({ok:true,value});
@@ -21,7 +22,7 @@ async function scenario(name, exercise, options={}) {
   }
   localStorage.setItem('qiban.onboarded.v1','yes');
   if(options.accent&&!localStorage.getItem('qiban.appearance.v1'))localStorage.setItem('qiban.appearance.v1',JSON.stringify({version:1,accent:options.accent}));
-  const fixture=window.imageFixture={picks:[],previews:[],discards:[],requests:[],pickMode:'success',chatMode:'success',previewMode:'success',count:0,omittedImageIds:[],cancelled:[]};
+  const fixture=window.imageFixture={picks:[],previews:[],discards:[],requests:[],pickMode:'success',chatMode:options.chatMode??'success',previewMode:options.previewMode??'success',count:0,omittedImageIds:[],cancelled:[]};
   const status={mode:'demo',baseUrl:'https://api.deepseek.com',model:'',models:[],hasKey:false,remembered:false,needsSelection:false};
   window.qiban={
    status:async()=>ok(status),cards:async()=>ok({characters,issues:[]}),dataPath:async()=>ok('Synthetic fixture'),
@@ -40,12 +41,14 @@ async function scenario(name, exercise, options={}) {
    chatImagePreview:async(characterId,id)=>{
     fixture.previews.push({characterId,id});
     if(fixture.previewMode==='missing')return ok(null);
+    if(fixture.previewMode==='delay')return new Promise(resolve=>{fixture.finishPreview=value=>resolve(ok(value));});
     if(fixture.previewMode==='remote')return ok('https://example.invalid/private.png');
     return ok(previewUrl);
    },
    discardChatImage:async(characterId,id)=>{fixture.discards.push({characterId,id});return ok();},
    chat:async(request,id)=>{
     fixture.requests.push(structuredClone(request));
+    if(fixture.chatMode==='missing')return {ok:false,error:'图片无法读取，请编辑消息后重新选择。'};
     if(fixture.chatMode==='error')return {ok:false,error:'当前模型暂不支持图片，请选择支持图片的模型。'};
     const value={content:'这是一张演示图片。演示模式不会识别图片，我们可以聊聊你想去的地方。',mode:'demo',omittedImageIds:fixture.omittedImageIds};
     if(fixture.chatMode==='delay')return new Promise(resolve=>{fixture.finishChat=()=>resolve(ok(value));});
@@ -153,6 +156,32 @@ try{
   await send(page).click();await expect(page.locator('.message.user .bubble')).toHaveText('改成普通文本');await expect(page.locator('.message.user .chat-image')).toHaveCount(0);
   expect(JSON.parse(await page.evaluate(()=>localStorage.getItem('synthetic.image.history'))).lin[0]).not.toHaveProperty('image');
  },{history:{lin:[{id:'synthetic-user',role:'user',content:'',image}]}});
+ const missingImage={...image,id:'image-00000000-0000-0000-0000-000000000009'};
+ const earlier=[{id:'earlier-user',role:'user',content:'保留前面的聊天'},{id:'earlier-assistant',role:'assistant',content:'前面的合成回复',mode:'demo'}];
+ for(const replace of [false,true])await scenario(`missing pending attachment can be edited and ${replace?'replaced':'removed'} without clearing earlier history`,async page=>{
+  await page.getByRole('button',{name:'重试回复'}).click();await expect(page.locator('.chat-error')).toHaveText('图片无法读取，请编辑消息后重新选择。');
+  await page.getByRole('button',{name:'编辑消息'}).click();await expect(input(page)).toBeEnabled();await expect(input(page)).toHaveValue('原图片的文字');
+  await expect(page.getByRole('alert')).toHaveText('原图片无法读取，已从编辑草稿移除。可以发送文字或重新选图。');
+  await expect(draft(page)).toHaveCount(0);await expect(attach(page)).toBeEnabled();await expect(page.locator('.message.user .bubble')).toHaveText('保留前面的聊天');
+  expect(JSON.parse(await page.evaluate(()=>localStorage.getItem('synthetic.image.history'))).lin).toEqual([...earlier,{id:'missing-user',role:'user',content:'原图片的文字',image:missingImage}]);
+  await input(page).fill(replace?'换一张新图':'改成纯文字');
+  if(replace){await change(page,{previewMode:'success'});await pick(page);}
+  await change(page,{chatMode:'success'});await send(page).click();await expect(page.locator('.message.assistant[data-mode] .bubble')).toHaveCount(2);
+  const saved=JSON.parse(await page.evaluate(()=>localStorage.getItem('synthetic.image.history'))).lin;
+  expect(saved.slice(0,2)).toEqual(earlier);expect(saved).toHaveLength(4);expect(saved[2].id).toBe('missing-user');
+  if(replace){expect(saved[2].image).toEqual(image);await expect(page.locator('.message.user .chat-image img')).toBeVisible();}
+  else {expect(saved[2]).not.toHaveProperty('image');await expect(page.locator('.message.user .chat-image')).toHaveCount(0);}
+  await expect(input(page)).toBeFocused();await expect(page.getByRole('alert')).toHaveCount(0);
+  expect((await fixture(page)).discards).toHaveLength(0);
+ },{previewMode:'missing',chatMode:'missing',history:{lin:[...earlier,{id:'missing-user',role:'user',content:'原图片的文字',image:missingImage}]}});
+ await scenario('missing pending attachment cancellation does not reopen another character editor',async page=>{
+  await expect(page.locator('.message.user .chat-image img')).toBeVisible();await change(page,{previewMode:'delay'});
+  await page.getByRole('button',{name:'编辑消息'}).click();await page.waitForFunction(()=>typeof window.imageFixture.finishPreview==='function');
+  const next=page.getByRole('button',{name:'豆包',exact:true});await next.click();await page.evaluate(()=>window.imageFixture.finishPreview(null));
+  await expect(page.getByRole('heading',{name:'豆包',exact:true})).toBeVisible();await expect(input(page)).toBeEnabled();await expect(input(page)).toHaveValue('');
+  await expect(next).toBeFocused();await expect(page.getByRole('alert')).toHaveCount(0);await expect(draft(page)).toHaveCount(0);
+  expect(JSON.parse(await page.evaluate(()=>localStorage.getItem('synthetic.image.history'))).lin.at(-1).image).toEqual(missingImage);
+ },{history:{lin:[...earlier,{id:'missing-user',role:'user',content:'原图片的文字',image:missingImage}]}});
  const older={...image,id:'image-00000000-0000-0000-0000-000000000009'};
  await scenario('reply omission is visible beside the preserved historical thumbnail',async page=>{
   await change(page,{omittedImageIds:[older.id]});await input(page).fill('继续聊聊');await send(page).click();

@@ -285,7 +285,7 @@ export function App() {
     if (busy || imageDraft.picking || last?.role !== "user") return;
     cancelRequest();
     if (last.image) {
-      if (!await imageDraft.restore(last.image)) return;
+      if (await imageDraft.restore(last.image) === "cancelled") return;
       setEditingImageId(last.id);
     } else {
       setConversations((current) =>
