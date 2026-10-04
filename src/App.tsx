@@ -12,6 +12,7 @@ import { ConnectionPanel } from "./ConnectionPanel";
 import { AndroidConnectionPanel } from "./android/AndroidConnectionPanel";
 import { CharacterPicker } from "./CharacterPicker";
 import { ChatMessages } from "./ChatMessages";
+import { clearAppearance } from "./appearance";
 import {
   ChatError,
   sendMessage,
@@ -346,6 +347,7 @@ export function App() {
                     setDeletingData(false);
                     throw new Error(result.error);
                   }
+                  clearAppearance();
                   window.location.reload();
                 }}
               />
