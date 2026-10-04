@@ -31,16 +31,30 @@ export function ChatMessages({
       aria-live="polite"
       aria-relevant="additions text"
     >
-      <div className="welcome">
-        <Avatar character={character} size="hero" />
-        <h3>和{character.name}，聊聊日常</h3>
-        <p>{character.description}</p>
-        <span className="welcome-label">{character.kind}</span>
-      </div>
+      {!messages.length ? (
+        <div className="welcome">
+          <div className="welcome-portrait">
+            <Avatar character={character} size="hero" />
+          </div>
+          <div className="welcome-copy">
+            <span className="welcome-label">
+              你的{character.role}
+            </span>
+            <h3>
+              和{character.name}，<br />聊聊日常。
+            </h3>
+            <p>{character.description}</p>
+          </div>
+        </div>
+      ) : (
+        <p className="conversation-start">
+          故事从这里开始
+        </p>
+      )}
       <div className="message assistant">
         <Avatar character={character} size="tiny" />
         <div>
-          <span className="message-name">{character.name}</span>
+          <span className="message-name">开场白</span>
           <p className="bubble">{character.greeting}</p>
         </div>
       </div>
