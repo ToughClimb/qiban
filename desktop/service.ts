@@ -3,6 +3,8 @@ import { createProvider } from "../server/provider.js";
 import { modelRequest, prepareImageModelRequest, finalText, LIVE_MODEL } from "../server/model.js";
 import type { ChatImageResolver } from "../server/image-chat.js";
 import { prepareChatContext } from "../shared/chat.js";
+import type { Conversations } from "../shared/history.js";
+import { conversationInterrupted } from "./history.js";
 import { parseChat } from "../server/validation.js";
 import type { ChatRequest } from "../shared/characters.js";
 import {
@@ -183,6 +185,10 @@ export class DesktopService {
   }
   cancelCharacter(characterId: string) {
     if (this.activeCharacter === characterId) this.cancelAll();
+  }
+  historySaved(previous: Conversations, saved: Conversations) {
+    for (const owner of Object.keys(previous))
+      if (conversationInterrupted(previous[owner], saved[owner])) this.cancelCharacter(owner);
   }
   async chat(value: ChatRequest, id: string) {
     let prepared;

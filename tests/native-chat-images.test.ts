@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { crc32 } from "node:zlib";
 import { ChatImageStore } from "../desktop/chat-images.js";
-import { HistoryStore } from "../desktop/history.js";
+import { HistoryStore, conversationInterrupted } from "../desktop/history.js";
 import { DesktopService } from "../desktop/service.js";
 import { ConnectionStore } from "../desktop/store.js";
 import type { Conversations } from "../shared/history.js";
+import { replaceConversation } from "../shared/history.js";
 import type { ChatImageAttachment } from "../shared/image-chat.js";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwSQv4DwAD5gH6hp8d8QAAAABJRU5ErkJggg==", "base64");
 function fixture(t: { after(fn: () => void): void }) {
@@ -154,4 +155,66 @@ test("first Send and retry resolve staged image before history effect; unrelated
   await service.chat(request, "restored-retry"); assert.equal(posts, 3);
   images.discard("lin", draft.image.id); assert.ok(images.preview("lin", draft.image.id));
   restored.reconcile({}, history.load()); await assert.rejects(service.chat(request, "removed"), /图片/); assert.equal(posts, 3);
+});
+for (const withImage of [true, false]) test(`history rollover 200 -> 199 keeps pending ${withImage ? "image" : "text"} reply and saved image across restart`, async t => {
+  const { directory, source, images } = fixture(t);
+  const history = new HistoryStore(directory);
+  const previous: Conversations = { lin: Array.from({ length: 200 }, (_, index) => ({ id: `old-${index}`, role: index % 2 ? "assistant" as const : "user" as const, content: `fixture ${index}` })) };
+  history.save(previous); images.reconcile(previous);
+  const draft = withImage ? await images.import("lin", source, async () => png) : undefined;
+  const user = { id: "next-user", role: "user" as const, content: draft ? "" : "next fixture", ...(draft ? { image: draft.image } : {}) };
+  const next = replaceConversation(previous, "lin", [...previous.lin!, user]);
+  assert.equal(next.lin!.length, 199); assert.equal(next.lin![0].id, "old-2");
+  assert.equal(conversationInterrupted(previous.lin, next.lin), false);
+  const store = new ConnectionStore(directory, { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" });
+  let finish!: (value: unknown) => void;
+  let entered!: () => void;
+  const ready = new Promise<void>(accept => { entered = accept; });
+  let signal!: AbortSignal;
+  const service = new DesktopService(store, async (_url, _key, body, abort) => {
+    if (!body) return { data: [{ id: "deepseek-flash" }] };
+    signal = abort!; entered(); return new Promise(resolve => { finish = resolve; });
+  }, undefined, images.resolve);
+  await service.connect({ baseUrl: "https://provider.example", apiKey: "synthetic-fixture-key", remember: false });
+  const request = { characterId: "lin", messages: next.lin!.map(({ role, content, image }) => ({ role, content, ...(image ? { image } : {}) })) };
+  const pending = service.chat(request, "rollover-send"); await ready;
+  // Same successful-save hooks used by main IPC, while the reply is pending.
+  history.save(next); const saved = history.load(); service.historySaved(previous, saved); images.reconcile(saved, previous);
+  assert.equal(signal.aborted, false);
+  if (draft) assert.ok(images.preview("lin", draft.image.id));
+  finish({ choices: [{ message: { content: "rollover reply" } }] });
+  const reply = await pending; assert.equal(reply.content, "rollover reply");
+  const complete = replaceConversation(saved, "lin", [...saved.lin!, { id: "next-assistant", role: "assistant", content: reply.content }]);
+  history.save(complete); images.reconcile(complete, saved);
+  const restarted = new ChatImageStore(directory); restarted.reconcile(history.load());
+  assert.equal(history.load().lin!.length, 200);
+  if (draft) {
+    assert.equal(history.load().lin!.at(-2)!.image!.id, draft.image.id);
+    assert.ok(restarted.preview("lin", draft.image.id));
+    assert.deepEqual((await restarted.resolve(draft.image, "lin")).bytes, png);
+  }
+});
+test("identity-based reset/tail removal/edit still cancels replies and clears drafts, without deleting a newly saved reference", async t => {
+  const { directory, source, images } = fixture(t);
+  const previous: Conversations = { lin: [{ id: "old-user", role: "user", content: "old" }, { id: "old-assistant", role: "assistant", content: "reply" }] };
+  const draft = await images.import("lin", source, async () => png);
+  const replacement: Conversations = { lin: [message(draft.image)] };
+  assert.equal(conversationInterrupted(previous.lin, replacement.lin), true);
+  images.reconcile(replacement, previous); assert.ok(images.preview("lin", draft.image.id));
+  const store = new ConnectionStore(directory, { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" });
+  let finish!: (value: unknown) => void; let signal!: AbortSignal;
+  const service = new DesktopService(store, async (_url, _key, body, abort) => {
+    if (!body) return { data: [{ id: "deepseek-flash" }] };
+    signal = abort!; return new Promise(resolve => { finish = resolve; });
+  }, undefined, images.resolve);
+  await service.connect({ baseUrl: "https://provider.example", apiKey: "synthetic-fixture-key", remember: false });
+  for (const saved of [{}, { lin: previous.lin!.slice(0, 1) }, { lin: previous.lin!.map(entry => ({ ...entry, content: "edited" })) }]) {
+    assert.equal(conversationInterrupted(previous.lin, saved.lin), true);
+    const pending = service.chat({ characterId: "lin", messages: [{ role: "user", content: "pending fixture" }] }, "reset-send");
+    service.historySaved(previous, saved); assert.equal(signal.aborted, true);
+    finish({ choices: [{ message: { content: "late fixture" } }] }); await assert.rejects(pending, /取消/);
+  }
+  const pendingDraft = await images.import("lin", source, async () => png);
+  images.reconcile({}, replacement); assert.equal(images.preview("lin", pendingDraft.image.id), null);
+  assert.equal(images.preview("lin", draft.image.id), null);
 });
