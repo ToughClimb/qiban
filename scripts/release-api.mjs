@@ -34,9 +34,13 @@ async function request(path, method = "GET", body, upload = false, uploadSize) {
 }
 
 async function draft() {
-  const release = await request(`/releases/tags/${identity.tag}`);
+  const id = process.env.QIBAN_RELEASE_ID;
+  if (!/^[1-9]\d*$/.test(id ?? "") || !Number.isSafeInteger(Number(id)))
+    throw new Error("Release job needs the draft ID returned by preflight.");
+  const release = await request(`/releases/${id}`);
   if (!release) throw new Error("The preflight draft is missing.");
   verifyDraft(release, identity);
+  if (release.id !== Number(id)) throw new Error("GitHub returned a different release ID.");
   return release;
 }
 
@@ -63,7 +67,12 @@ if (command === "preflight") {
       step.name === "API35 installation and native demo smoke" && step.conclusion === "success")))
       throw new Error("Exact-SHA API35 emulator verification is required; a skipped emulator is insufficient.");
   }
-  let release = await request(`/releases/tags/${identity.tag}`);
+  // The tag endpoint only returns published releases. Authenticated listings include drafts.
+  const releases = await request("/releases?per_page=100");
+  if (!Array.isArray(releases)) throw new Error("GitHub did not return a release listing.");
+  let release = releases.find(item => item.tag_name === identity.tag);
+  if (!release && releases.length >= 100)
+    throw new Error("Release listing exceeds the lookup bound; refusing to create a possible duplicate draft.");
   if (release) {
     verifyDraft(release, identity);
     release = await request(`/releases/${release.id}`, "PATCH", { draft: true, prerelease: true });
@@ -77,7 +86,7 @@ if (command === "preflight") {
     });
   }
   verifyDraft(release, identity);
-  await appendFile(process.env.GITHUB_OUTPUT, `scope=${identity.scope}\n`);
+  await appendFile(process.env.GITHUB_OUTPUT, `scope=${identity.scope}\nrelease_id=${release.id}\n`);
   console.log(`PASS release preflight: repository ID, reviewed tag, exact-SHA CI/emulator and draft contents-write permission. ${identity.commit}`);
 } else if (command === "upload") {
   const platform = process.argv[3];

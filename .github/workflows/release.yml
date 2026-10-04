@@ -17,6 +17,7 @@ jobs:
       actions: read
     outputs:
       scope: ${{ steps.gate.outputs.scope }}
+      release_id: ${{ steps.gate.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node --test scripts/release-policy.test.mjs
+      - run: node --test scripts/release-policy.test.mjs scripts/release-api.test.mjs
       - name: Exact-SHA CI and early draft permission check
         id: gate
         run: node scripts/release-api.mjs preflight
@@ -92,6 +93,7 @@ jobs:
         run: node scripts/release-api.mjs upload windows
         env:
           GH_TOKEN: ${{ github.token }}
+          QIBAN_RELEASE_ID: ${{ needs.preflight.outputs.release_id }}
 
   android:
     needs: preflight
@@ -164,6 +166,7 @@ jobs:
         run: node scripts/release-api.mjs upload android
         env:
           GH_TOKEN: ${{ github.token }}
+          QIBAN_RELEASE_ID: ${{ needs.preflight.outputs.release_id }}
 
   publish:
     needs: [preflight, windows, android]
@@ -186,5 +189,6 @@ jobs:
         run: node scripts/release-api.mjs publish
         env:
           GH_TOKEN: ${{ github.token }}
+          QIBAN_RELEASE_ID: ${{ needs.preflight.outputs.release_id }}
           QIBAN_WINDOWS_MANIFEST: ${{ needs.windows.outputs.manifest }}
           QIBAN_ANDROID_MANIFEST: ${{ needs.android.outputs.manifest }}

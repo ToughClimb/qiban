@@ -19,7 +19,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Reviewed release policy
-        run: node --test scripts/release-policy.test.mjs scripts/release-archives.test.mjs
+        run: node --test scripts/release-policy.test.mjs scripts/release-archives.test.mjs scripts/release-api.test.mjs
       - run: npm run build
       - name: Connection setup regressions
         run: node tests/connection-panel-smoke.mjs
