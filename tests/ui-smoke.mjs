@@ -319,15 +319,15 @@ try {
     liveUI.page.getByText("演示模式", { exact: true }),
   ).toBeVisible();
   await expect(
-    liveUI.page.getByText("林野 · 演示回复", { exact: true }),
+    liveUI.page.locator('.message.assistant[data-mode="demo"] .bubble'),
   ).toBeVisible();
   await expect(liveUI.page.getByLabel("输入体验口令，开始聊天")).toHaveCount(0);
   await liveUI.page.reload();
   await expect(
-    liveUI.page.getByText("林野 · 演示回复", { exact: true }),
+    liveUI.page.locator('.message.assistant[data-mode="demo"] .bubble'),
   ).toBeVisible();
   await expect(
-    liveUI.page.getByText("林野 · AI 回复", { exact: true }),
+    liveUI.page.locator('.message.assistant[data-mode="live"] .bubble'),
   ).toBeVisible();
   console.log(
     "PASS response mode: stale live banner updates to demo; reply source survives reload with mixed history",

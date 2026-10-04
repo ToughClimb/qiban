@@ -7,6 +7,7 @@ import {
   type CardPreview,
 } from "../shared/cards";
 import { desktopBridge } from "./api";
+import { Avatar } from "./Avatar";
 const labels: Record<keyof CardFields, string> = {
   name: "角色名字",
   description: "角色背景与外貌",
@@ -27,10 +28,14 @@ export function CardPanel({
   character,
   onChanged,
   onDelete,
+  onChangeAvatar,
+  onResetAvatar,
 }: {
   character: Character;
   onChanged: (list: CardList, id?: string) => void;
   onDelete: (id: string) => void;
+  onChangeAvatar?: (id: string) => Promise<void>;
+  onResetAvatar?: (id: string) => Promise<void>;
 }) {
   const bridge = desktopBridge()!;
   const dialog = useRef<HTMLDialogElement>(null);
@@ -74,9 +79,10 @@ export function CardPanel({
     <>
       <button
         className="quiet-button"
+        aria-label="管理角色"
         onClick={() => dialog.current?.showModal()}
       >
-        管理角色
+        角色
       </button>
       <dialog
         className="settings-dialog card-dialog"
@@ -94,12 +100,35 @@ export function CardPanel({
         >
           ×
         </button>
-        <p className="eyebrow">你的角色小册</p>
-        <h2>把想象写成一位伙伴。</h2>
+        <h2>角色</h2>
         <p className="settings-intro">
-          导入 JSON
-          角色，或写下自己的设定。角色始终是虚拟的；不会执行文件中的代码、工具或链接。
+          导入或创建虚拟角色。
         </p>
+        {onChangeAvatar && !fields && !preview && (
+          <div className="avatar-editor">
+            <Avatar character={character} />
+            <button
+              className="quiet-button"
+              type="button"
+              aria-label={`更换${character.name}的头像`}
+              disabled={busy}
+              onClick={() => void perform(() => onChangeAvatar(character.id))}
+            >
+              更换头像
+            </button>
+            {character.avatarUrl &&
+              onResetAvatar && (
+                <button
+                  className="quiet-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void perform(() => onResetAvatar(character.id))}
+                >
+                  恢复默认
+                </button>
+              )}
+          </div>
+        )}
         {!fields && !preview && (
           <div className="card-actions">
             <button
