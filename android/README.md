@@ -1,5 +1,7 @@
 # 栖伴 Android 开发与试用
 
+手机试用步骤见[Android使用说明](../docs/ANDROID_USER_GUIDE.zh-CN.md)。
+
 Android 使用 Capacitor 8 的本地 WebView 和固定方法的 `Qiban` 原生插件。没有 Electron、Node 服务或网页密钥输入框。默认演示聊天离线运行；真人设定及宠物都是虚拟伙伴。首次打开可直接选择“先用演示聊天”。
 
 ## 构建
@@ -18,7 +20,7 @@ npm run test:android-ui
 
 `android:sync` 构建共享前端并复制进应用；只运行 Gradle 不会刷新前端。`tools/cap.mjs` 使用 Node 24 加载 TypeScript 配置，绕过固定版本 Capacitor CLI 8.0.0 与仓库 TypeScript 7 编译接口的差异。升级 Capacitor 时必须复核这个小适配器。Windows 构建配置不受此适配器影响。
 
-unsigned 输出 `app/build/outputs/apk/release/app-release-unsigned.apk`，不可直接安装。debug 输出 `app/build/outputs/apk/debug/app-debug.apk`，使用开发机器生成的测试身份。测试签名已获本次任务授权；私钥、密钥库和密码不提交或上传。CI 只做免费公开仓库 Ubuntu 校验，不上传 APK/密钥、不发布。正式发布必须另行确认受维护者控制的持久签名身份和发布步骤。同一包名升级需要兼容签名；换测试身份可能需要先备份并卸载旧应用。不要规避系统安装提示。
+unsigned 输出 `app/build/outputs/apk/release/app-release-unsigned.apk`，不可直接安装。debug 输出 `app/build/outputs/apk/debug/app-debug.apk`，使用开发机器生成的测试身份。测试签名已获本次任务授权；私钥、密钥库和密码不提交或上传。普通CI只做公开仓库Ubuntu校验，不上传APK或密钥；另有精确提交门槛的预览Release流程，可发布已授权的临时签名测试APK。正式发布仍需确认受维护者控制的持久签名身份和发布步骤。同一包名升级需要兼容签名；换测试身份可能需要先备份并卸载旧应用。不要规避系统安装提示。
 
 ## 数据与连接
 
@@ -36,13 +38,13 @@ unsigned 输出 `app/build/outputs/apk/release/app-release-unsigned.apk`，不�
 
 ## 接口与验收
 
-`src/android/bridge.ts` 的 `AndroidPlugin` 只允许连接状态/模型选择/原生密钥输入、角色 CRUD 与系统导入导出、头像及聊天图片选择/预览/删除、历史读写、诊断、聊天和取消。没有任意路径、URL 请求、shell 或 JavaScript 凭据参数。`createAndroidBridge` 适配现有 `DesktopBridge`，实现已协调的 `importAvatar(id)`、`deleteAvatar(id)`、`pickChatImage(characterId)`、`chatImagePreview(characterId,imageId)`、`discardChatImage(characterId,imageId)`；取消选择返回null，图片草稿返回 `{image,previewUrl}`，预览返回URL或null。`chat()` 传元数据引用给原生并合并受校验的 `omittedImageIds`，不向原生发送预览URL。角色加载期间的取消会在原生调用前再次检查；已取消的原生回复不暴露给UI。原生保留最多128个有界请求ID，避免取消先于后台任务登记时丢失。`cards()` 的 `avatarUrl` 仅来自原生验证后的PNG，不来自卡片源JSON。共享可选头像类型按父线程指定从 `faa19c3`、图片核心从 `8a71072` 单独合入；共享头像/图片聊天UI仍由Windows/视觉工作流负责。外观组件和算法原样复用集成提交 `9db54004` 的版本，Android仅负责挂载和启动时应用已有设置。
+`src/android/bridge.ts` 的 `AndroidPlugin` 只允许连接状态/模型选择/原生密钥输入、角色 CRUD 与系统导入导出、头像及聊天图片选择/预览/删除、历史读写、诊断、聊天和取消。没有任意路径、URL 请求、shell 或 JavaScript 凭据参数。`createAndroidBridge` 适配现有 `DesktopBridge`，实现已协调的 `importAvatar(id)`、`deleteAvatar(id)`、`pickChatImage(characterId)`、`chatImagePreview(characterId,imageId)`、`discardChatImage(characterId,imageId)`；取消选择返回null，图片草稿返回 `{image,previewUrl}`，预览返回URL或null。`chat()` 传元数据引用给原生并合并受校验的 `omittedImageIds`，不向原生发送预览URL。角色加载期间的取消会在原生调用前再次检查；已取消的原生回复不暴露给UI。原生保留最多128个有界请求ID，避免取消先于后台任务登记时丢失。`cards()` 的 `avatarUrl` 仅来自原生验证后的PNG，不来自卡片源JSON。头像、图片聊天界面、图片引用类型及外观组件由桌面和Android共用；Android桥接将固定操作交给原生插件，并在启动时恢复已有主题设置。
 
 WebView 从APK资源直接提供规范路径的 `https://localhost` 文件，拒绝所有编码/歧义路径及 `/_capacitor_file_`、`/_capacitor_content_`、HTTP代理等保留路由，不能读取本机任意路径。禁止远程导航、弹窗、子资源、Service Worker网络；CSP 禁止网页网络连接，仅对打包首页的可信Capacitor启动脚本授予精确SHA256，兼容较旧WebView且不开放任意内联脚本。关闭调试、明文混合资源、文件/内容 URL 访问。仅有联网运行权限，AndroidX另生成应用内部签名权限。
 
 Capacitor内置HTTP、Cookies和WebView插件在原生注册表内替换为明确拒绝操作的实现；原始HTTP/Cookies JavaScript接口被移除。仅设置 `CapacitorHttp.enabled=false` 不构成原生能力边界。固定Qiban操作及必要SystemBars显示功能保留。回归测试通过真实PluginHandle派发调用禁用方法并验证拒绝，也对保留文件/内容/代理路由实际请求验证403。升级Capacitor必须重新审计其自动注册插件、接口和资源服务器。
 
-CI 的push及按需运行可在具有KVM的标准免费Ubuntu24.04公开仓库runner上执行API35模拟器安装、首页可见、原生离线演示切换及真实WebView桥接检查。测试失败时只打印有界JUnit异常栈，不上传报告。仪器测试还覆盖合成图片的选择器回调/预览/持久化/离线请求序列化/清理，以及实际Android外观控件选色、Activity重建后的恢复、原生删除后的主题重置和旧页面写回阻止；合成测试不调用付费模型，不等同真人完成系统文档选择器流程。debug清单仅声明固定合成图片提供商的可见性，给直接注入回调的夹具补上提供商可见性；真实SAF URI授权流程仍需设备验收，release清单不包含该测试查询。没有KVM时明确跳过，不声称验收。模拟器、UI树和日志只留在临时runner，不上传。模拟器成功仍不等于真机、最低API、系统文件选择器或签名升级验收。每个CI构建打印APK哈希与公开证书指纹，不保存私钥或密钥库；不同CI构建的测试身份不保证相同。最终合并SHA获父线程审查后，最快交付路径是按该SHA构建，记录哈希/证书，再仅上传指定APK；未经这个门槛当前流程不会上传。
+CI 的push及按需运行可在具有KVM的标准免费Ubuntu24.04公开仓库runner上执行API35模拟器安装、首页可见、原生离线演示切换及真实WebView桥接检查。测试失败时只打印有界JUnit异常栈，不上传报告。仪器测试还覆盖合成图片的选择器回调/预览/持久化/离线请求序列化/清理，以及实际Android外观控件选色、Activity重建后的恢复、原生删除后的主题重置和旧页面写回阻止；合成测试不调用付费模型，不等同真人完成系统文档选择器流程。debug清单仅声明固定合成图片提供商的可见性，给直接注入回调的夹具补上提供商可见性；真实SAF URI授权流程仍需设备验收，release清单不包含该测试查询。没有KVM时明确跳过，不声称验收。模拟器、UI树和日志只留在临时runner，不上传。模拟器成功仍不等于真机、最低API、系统文件选择器或签名升级验收。每个CI构建打印APK哈希与公开证书指纹，不保存私钥或密钥库；不同CI构建的测试身份不保证相同。发布流程只接受已审查的精确提交标签，要求同一提交的Windows检查和API35模拟器检查通过；重新构建后校验实际包、许可、来源、APK哈希和公开测试证书，再上传到预览Release。普通push检查不上传APK或密钥。Windows单平台预览不包含APK。
 
 自动测试覆盖源 JSON 保留、确认与并发编辑、元数据隔离、凭据拒绝、原生 JSON/历史限额和公网地址检查；浏览器测试使用模拟插件。APK 构建、Robolectric 和浏览器通过不等于真机验收。维护者发布前需在真机检查首次离线演示、原生密钥取消/重填、TLS失败、模型切换、聊天取消、系统文件选择器、损坏数据、后台重启、键盘/安全区及升级后的数据保留。
 

@@ -129,6 +129,8 @@ if (command === "preflight") {
   const body = `栖伴 Qiban ${identity.version} 预览版\n\n` +
     `虚拟角色与宠物聊天。本地演示不调用模型；真实聊天须在应用内配置自己的兼容服务。\n\n` +
     `Commit: \`${identity.commit}\`\nVerification/build: https://github.com/${REPOSITORY}/actions/runs/${runId}\n\n` +
+    `使用说明：[Windows](https://github.com/${REPOSITORY}/blob/${identity.commit}/docs/USER_GUIDE.zh-CN.md)` +
+    (identity.scope === "both" ? ` · [Android](https://github.com/${REPOSITORY}/blob/${identity.commit}/docs/ANDROID_USER_GUIDE.zh-CN.md)` : "") + `\n\n` +
     `Windows x64 installer/ZIP are unsigned. No update feed is configured. Standard-user/SmartScreen/Chinese IME acceptance is not established by hosted CI.\n\n` +
     (identity.scope === "windows" ? `This prerelease delivers Windows only. Android image chat remains under verification; no Android APK is included or claimed here.\n\n` :
       `Android APK is an installable debug/test build with a disposable public test certificate. No stable signing identity or future upgrade compatibility is promised. API35 emulator verification is required; this is not physical-device acceptance.\n\n`) +

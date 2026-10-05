@@ -63,6 +63,10 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run android:sync
+      - name: Android settings and appearance UI regressions
+        run: npm run test:android-ui
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
       - run: npm run android:test
       - run: npm run android:unsigned
       - name: Build local test APK
